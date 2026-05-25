@@ -20,10 +20,12 @@ QImage bitmapToImage(const OP2Utility::BitmapFile &bmp)
     QImage indexed(reinterpret_cast<const uchar *>(bmp.pixels.data()),
                    width, height, pitch, QImage::Format_Indexed8);
 
+    // OP2 palette entries are stored BGR — the struct field named `red` actually
+    // holds the blue channel and `blue` holds red. Swap when building the QRgb table.
     QList<QRgb> palette;
     palette.reserve(static_cast<int>(bmp.palette.size()));
     for (const auto &c : bmp.palette)
-        palette.append(qRgb(c.red, c.green, c.blue));
+        palette.append(qRgb(c.blue, c.green, c.red));
     indexed.setColorTable(palette);
 
     QImage rgb = indexed.convertToFormat(QImage::Format_ARGB32);
