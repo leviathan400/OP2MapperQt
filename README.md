@@ -4,6 +4,9 @@
 
 ## What is it?
 
-OP2MapperQt is an application for opening Outpost 2: Divided Destiny map files to view. It's cross platform. 
+OP2MapperQt is an application for opening Outpost 2: Divided Destiny map files to view. It's cross platform (Qt 6.11.1).
+
+Uses OP2Utility.
 
 It requires a Outpost 2 (1.4.1) folder. It loads the tile graphics from the well bmp files.
+
