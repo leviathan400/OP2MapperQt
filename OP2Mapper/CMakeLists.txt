@@ -30,6 +30,30 @@ qt_add_executable(appOP2Mapper
     src/Settings.cpp
     src/CellTypeInfo.h
     src/CellTypeInfo.cpp
+    src/MiniMap.h
+    src/MiniMap.cpp
+    src/TilesetGrid.h
+    src/TilesetGrid.cpp
+    src/TilesetWindow.h
+    src/TilesetWindow.cpp
+    src/CellTypesWindow.h
+    src/CellTypesWindow.cpp
+    src/TileClipboard.h
+    src/TileClipboard.cpp
+    src/JsonWriter.h
+    src/JsonWriter.cpp
+    src/TileGroupIO.h
+    src/TileGroupIO.cpp
+    src/TileSelectWindow.h
+    src/TileSelectWindow.cpp
+    src/TileGroupsWindow.h
+    src/TileGroupsWindow.cpp
+    src/BlankMaps.h
+    src/BlankMaps.cpp
+    src/NewMapDialog.h
+    src/NewMapDialog.cpp
+    src/MapJsonIO.h
+    src/MapJsonIO.cpp
 )
 
 target_include_directories(appOP2Mapper PRIVATE src)

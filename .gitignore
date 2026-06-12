@@ -1,0 +1,62 @@
+# ---- Third-party (cloned separately by contributors) ----
+/OP2Utility/
+
+# ---- Build directories ----
+build/
+build-*/
+out/
+cmake-build-*/
+
+# ---- CMake generated ----
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+*.cmake.in
+
+# ---- Qt / Qt Creator ----
+.qtcreator/
+.qtc_clangd/
+*.user
+*.user.*
+*.autosave
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*_autogen/
+.qt/
+.rcc/
+
+# ---- Compiler / linker output ----
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.exp
+*.pdb
+*.ilk
+*.idb
+*.exp
+
+# ---- Visual Studio / VS Code ----
+.vs/
+.vscode/
+*.sln.docstates
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+
+# ---- OS junk ----
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
