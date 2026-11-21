@@ -62,12 +62,11 @@ QPixmap splashPixmap()
     title.setPixelSize(24);
     p.setFont(title);
     p.setPen(Qt::black);
-    p.drawText(QRect(249, 20, 240, 192), Qt::AlignLeft | Qt::AlignBottom, QStringLiteral("OP2Mapper3"));
+    p.drawText(QRect(249, 20, 240, 192), Qt::AlignLeft | Qt::AlignBottom, QString::fromLatin1(AppInfo::DisplayName));
     QFont small(QStringLiteral("Segoe UI"));
     small.setPixelSize(12);
     p.setFont(small);
-    p.drawText(QPoint(249, 236), QStringLiteral("Version %1 (build %2)").arg(QString::fromLatin1(AppInfo::Version),
-                                                                           QString::fromLatin1(AppInfo::Build)));
+    p.drawText(QPoint(249, 236), QStringLiteral("Version %1").arg(QString::fromLatin1(AppInfo::Version)));
     p.drawText(QPoint(249, 256), QStringLiteral("Copyright © Outpost Universe"));
     return pm;
 }

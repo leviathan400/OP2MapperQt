@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(OP2Mapper VERSION 0.1 LANGUAGES CXX)
+project(OP2Mapper VERSION 0.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,6 +82,8 @@ add_library(op2mapper_core STATIC
 )
 target_include_directories(op2mapper_core PUBLIC src)
 target_link_libraries(op2mapper_core PUBLIC Qt6::Widgets Qt6::Network)
+# The app version (src/AppInfo.h) is the project version above.
+target_compile_definitions(op2mapper_core PUBLIC OP2MAPPERQT_VERSION="${PROJECT_VERSION}")
 set_target_properties(op2mapper_core PROPERTIES AUTOMOC ON)
 # Message texts contain non-ASCII characters (×, —, →); MSVC
 # must read and store the sources as UTF-8.

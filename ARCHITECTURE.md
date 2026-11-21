@@ -9,6 +9,7 @@ Keep this document up to date when the structure changes.
 ```
 OP2MapperQt/
 ├── README.md, ARCHITECTURE.md
+├── docs/OP2MapperQt.png        # README screenshot
 ├── .github/workflows/build.yml # CI: Windows, Linux and macOS builds
 ├── OP2Utility/                 # OP2Utility C++ library (map, tileset and archive I/O)
 └── OP2Mapper/
@@ -51,7 +52,7 @@ OP2MapperQt/
         ├── Settings, IniFile   # Mapper3.ini
         ├── AppLog              # OP2Mapper.log
         ├── OP2Launcher         # launch Outpost 2 / DLL picker; sound playback
-        └── AppInfo.h           # name, version, build
+        └── AppInfo.h           # name, version (from CMake), OP2Mapper3 release matched
 ```
 
 External libraries:

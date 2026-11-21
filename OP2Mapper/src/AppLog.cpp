@@ -59,9 +59,9 @@ void writeStartup(const QStringList &arguments)
     const QString args = arguments.isEmpty() ? QStringLiteral("(none)")
                                              : arguments.join(QLatin1Char(' '));
     write(QStringLiteral("Start"),
-          QStringLiteral("%1 %2 build %3 (Qt %4), %5-bit, %6 (kernel %7), folder %8, arguments: %9")
-              .arg(QString::fromLatin1(AppInfo::Name), QString::fromLatin1(AppInfo::Version),
-                   QString::fromLatin1(AppInfo::Build), QString::fromLatin1(qVersion()))
+          QStringLiteral("%1 %2 (Qt %3), %4-bit, %5 (kernel %6), folder %7, arguments: %8")
+              .arg(QString::fromLatin1(AppInfo::DisplayName), QString::fromLatin1(AppInfo::Version),
+                   QString::fromLatin1(qVersion()))
               .arg(sizeof(void *) * 8)
               .arg(QSysInfo::prettyProductName(), QSysInfo::kernelVersion(),
                    QDir::toNativeSeparators(QCoreApplication::applicationDirPath()), args));

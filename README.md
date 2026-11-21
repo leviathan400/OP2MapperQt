@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/leviathan400/OP2MapperQt/actions/workflows/build.yml/badge.svg)](https://github.com/leviathan400/OP2MapperQt/actions/workflows/build.yml)
 
-![Screenshot](https://images.outpostuniverse.org/OP2MapperQt.png)
+![Screenshot](docs/OP2MapperQt.png)
 
 ## What is it?
 
@@ -12,7 +12,7 @@ It requires an Outpost 2 (1.4.1) folder - select the root folder containing Outp
 
 ## Features
 
-OP2MapperQt follows OP2Mapper3 0.7.0: the same tools, menus, messages and settings file.
+**Current version: 0.7.0**, matching OP2Mapper3 0.7.0: the same tools, menus, messages and settings file.
 
 ### Terrain tools (via [op2maplib](https://github.com/OutpostUniverse/OP2MappingLib))
 - **Terrain Brush** - paint mud, rock, sand or vegetation; borders blend with the game's own transition tiles. Brush size 3-25 (Ctrl+wheel). **Clean Up Transitions** redoes the transitions across the whole map.

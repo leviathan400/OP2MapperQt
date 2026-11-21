@@ -31,8 +31,7 @@ QLabel *banner(QWidget *parent)
 }
 QString versionText()
 {
-    return QStringLiteral("Version %1 (Build %2)").arg(QString::fromLatin1(AppInfo::Version),
-                                                     QString::fromLatin1(AppInfo::Build));
+    return QStringLiteral("Version %1").arg(QString::fromLatin1(AppInfo::Version));
 }
 } // namespace
 
@@ -166,18 +165,19 @@ void SettingsDialog::onSave()
 void showAboutDialog(QWidget *parent)
 {
     QDialog dlg(parent);
-    dlg.setWindowTitle(QObject::tr("About OP2Mapper"));
+    dlg.setWindowTitle(QObject::tr("About %1").arg(QString::fromLatin1(AppInfo::DisplayName)));
     dlg.setWindowIcon(QIcon(QStringLiteral(":/images/IconLarge.ico")));
     dlg.setWindowFlags(dlg.windowFlags() & ~Qt::WindowContextHelpButtonHint);
     dlg.setFixedSize(664, 350);
     banner(&dlg);
-    auto *name = new QLabel(QString::fromLatin1(AppInfo::Name), &dlg);
+    auto *name = new QLabel(QString::fromLatin1(AppInfo::DisplayName), &dlg);
     QFont f = name->font();
     f.setPointSize(14);
     f.setBold(true);
     name->setFont(f);
     name->setGeometry(20, 140, 600, 28);
-    auto *ver = new QLabel(versionText() + QStringLiteral("  —  Qt %1").arg(QString::fromLatin1(qVersion())), &dlg);
+    auto *ver = new QLabel(versionText() + QStringLiteral("  —  Qt %1  —  based on %2")
+                               .arg(QString::fromLatin1(qVersion()), QString::fromLatin1(AppInfo::PortedFrom)), &dlg);
     ver->setGeometry(22, 170, 600, 22);
     auto *desc = new QLabel(QString::fromLatin1(AppInfo::Description), &dlg);
     desc->setGeometry(22, 200, 618, 40);
