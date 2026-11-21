@@ -13,14 +13,16 @@ OP2MapperQt/
 ├── .github/workflows/build.yml # CI: Windows, Linux and macOS builds
 ├── OP2Utility/                 # OP2Utility C++ library (map, tileset and archive I/O)
 └── OP2Mapper/
-    ├── CMakeLists.txt          # op2mapper_core library + appOP2Mapper (+ optional self-test)
+    ├── CMakeLists.txt          # op2mapper_core library + the OP2MapperQt program (+ optional self-test)
     ├── main.cpp                # single instance, log, splash, main window
     ├── app.qrc, app.rc         # resources; Windows icon
     ├── resources/
     │   ├── blankmaps/          # blank_WxH.map templates for New Map
     │   ├── images/             # icons, Settings/About banner, New Map biome pictures
     │   ├── sounds/             # splash sound
-    │   └── op2launcher/        # bundled op2launcher.exe + Launcher.dll
+    │   ├── op2launcher/        # bundled op2launcher.exe + Launcher.dll
+    │   ├── OP2MapperQt.png     # 256 px icon (Linux AppImage)
+    │   └── linux/              # .desktop entry for the AppImage
     ├── tests/selftest.cpp      # headless self-test of the editing core
     └── src/
         │   ── Application shell ──
@@ -158,9 +160,17 @@ Dirty state comes from the undo stack's clean index. `markNewUnsaved()` makes th
 
 There is no unit-test framework. `tests/selftest.cpp` (CMake option `OP2MAPPER_BUILD_SELFTEST`) drives the real `Editor`, `MapDocument`, `MapView` and `MainWindow` headlessly against an Outpost 2 install. It writes the Outpost 2 folder into the `Mapper3.ini` next to the test exe, answers message boxes automatically, and writes rendered images to check by eye. Run it with `QT_QPA_PLATFORM=offscreen` (and `QT_QPA_FONTDIR` pointing at a font folder so text renders).
 
-### Continuous integration
+### Continuous integration and releases
 
-`.github/workflows/build.yml` builds the app on Windows (MSVC), Linux (GCC) and macOS (Clang) with Qt 6.10 on every push and pull request, and uploads the builds as artifacts (windeployqt folder, macdeployqt app bundle, Linux executable). It checks out OP2Utility into `OP2Utility/` and OP2MappingLib beside the repository, both at pinned commits (`OP2UTILITY_REF`, `OP2MAPPINGLIB_REF`). Portability notes the build relies on:
+`.github/workflows/build.yml` builds the app on Windows (MSVC), Linux (GCC) and macOS (Clang) with Qt 6.10 on every push and pull request. It checks out OP2Utility into `OP2Utility/` and OP2MappingLib beside the repository, both at pinned commits (`OP2UTILITY_REF`, `OP2MAPPINGLIB_REF`), and uploads ready-to-run packages:
+
+- Windows: `OP2MapperQt-<ver>-Windows-x64.zip`, made with windeployqt plus the MSVC runtime DLLs
+- macOS: `OP2MapperQt-<ver>-macOS-<arch>.zip`, an app bundle made with macdeployqt (not signed)
+- Linux: `OP2MapperQt-<ver>-Linux-x86_64.AppImage`, made with linuxdeploy and its Qt plugin on Ubuntu 22.04
+
+Pushing a tag `v<version>` runs the same builds and creates a draft GitHub release with the packages attached; its notes are edited and the release published by hand. The tag should match `project(... VERSION ...)`.
+
+Portability notes the build relies on:
 
 - Windows-only code (sounds, palette snapping and title-bar menu, hidden folders) is behind `Q_OS_WIN`; Windows builds define `NOMINMAX`.
 - MSVC compiles with `/utf-8` (message texts contain non-ASCII characters) and links op2maplib against the same C runtime as Qt.

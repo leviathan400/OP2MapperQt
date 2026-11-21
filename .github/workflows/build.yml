@@ -1,4 +1,4 @@
-# Builds OP2MapperQt on Windows, Linux and macOS.
+# Builds OP2MapperQt on Windows, Linux and macOS, and publishes releases.
 #
 # The two libraries the app needs are checked out at pinned commits:
 #   OP2Utility    -> OP2MapperQt/OP2Utility   (upstream has no CMake files;
@@ -6,9 +6,14 @@
 #   OP2MappingLib -> OP2MappingLib, beside the repository (op2maplib)
 # Bump the *_REF values below to build against newer versions.
 #
-# Each job uploads a build: a deployed Windows folder (windeployqt), a
-# macOS app bundle (macdeployqt), and the Linux executable (needs Qt 6
-# installed to run).
+# Every run uploads ready-to-run packages as artifacts:
+#   Windows  OP2MapperQt-<ver>-Windows-x64.zip   (windeployqt + MSVC runtime)
+#   macOS    OP2MapperQt-<ver>-macOS-<arch>.zip  (macdeployqt app bundle)
+#   Linux    OP2MapperQt-<ver>-Linux-x86_64.AppImage (linuxdeploy, Qt bundled)
+# <ver> is the tag without its "v" for tag pushes, else "dev-<commit>".
+#
+# Pushing a tag v* also creates a DRAFT GitHub release with those packages
+# attached; edit its notes and publish it on GitHub.
 
 name: Build
 
@@ -34,7 +39,7 @@ jobs:
             os: windows-2022
             qt_arch: win64_msvc2022_64
           - name: Linux
-            os: ubuntu-24.04
+            os: ubuntu-22.04   # older glibc, so the AppImage runs on more distributions
             qt_arch: linux_gcc_64
           - name: macOS
             os: macos-latest
@@ -60,11 +65,22 @@ jobs:
           ref: ${{ env.OP2MAPPINGLIB_REF }}
           path: OP2MappingLib
 
+      - name: Package version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "PKG_VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
       - name: Install Linux build packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libegl1
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libegl1 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libfuse2
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -86,28 +102,75 @@ jobs:
         working-directory: OP2MapperQt
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item build/Release/appOP2Mapper.exe dist/
-          windeployqt --release --no-translations dist/appOP2Mapper.exe
+          $dist = "dist/OP2MapperQt"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          Copy-Item build/Release/OP2MapperQt.exe $dist
+          windeployqt --release --no-translations "$dist/OP2MapperQt.exe"
+          # The MSVC C++ runtime, so the app starts without the VC++ redistributable.
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT" -Directory |
+                 Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $crt) { throw "MSVC runtime redistributables not found under $vs" }
+          Copy-Item "$($crt.FullName)\*.dll" $dist
+          Compress-Archive -Path $dist -DestinationPath "dist/OP2MapperQt-$env:PKG_VERSION-Windows-x64.zip"
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         working-directory: OP2MapperQt
         run: |
-          macdeployqt build/appOP2Mapper.app
+          macdeployqt build/OP2MapperQt.app
           mkdir -p dist
-          ditto -c -k --keepParent build/appOP2Mapper.app dist/OP2MapperQt-macOS.zip
+          ditto -c -k --keepParent build/OP2MapperQt.app "dist/OP2MapperQt-$PKG_VERSION-macOS-$(uname -m).zip"
 
-      - name: Package (Linux)
+      - name: Package (Linux AppImage)
         if: runner.os == 'Linux'
         working-directory: OP2MapperQt
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         run: |
+          cmake --install build --prefix AppDir/usr
+          curl -sSfLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sSfLO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-*.AppImage
+          export QMAKE="$(command -v qmake)"
+          export OUTPUT="OP2MapperQt-$PKG_VERSION-Linux-x86_64.AppImage"
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+            --desktop-file OP2Mapper/resources/linux/OP2MapperQt.desktop \
+            --icon-file OP2Mapper/resources/OP2MapperQt.png \
+            --plugin qt --output appimage
           mkdir -p dist
-          cp build/appOP2Mapper dist/
-          tar -czf dist/OP2MapperQt-Linux.tar.gz -C dist appOP2Mapper
+          mv "$OUTPUT" dist/
 
-      - name: Upload build
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: OP2MapperQt-${{ matrix.name }}
-          path: OP2MapperQt/dist
+          path: OP2MapperQt/dist/OP2MapperQt-*
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l packages
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" packages/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" packages/* --repo "$GITHUB_REPOSITORY" --draft \
+              --title "OP2MapperQt ${GITHUB_REF_NAME#v}" \
+              --notes "Builds for Windows, macOS and Linux."
+          fi

@@ -10,6 +10,16 @@ OP2MapperQt is a cross-platform map editor for Outpost 2: Divided Destiny. Creat
 
 It requires an Outpost 2 (1.4.1) folder - select the root folder containing Outpost2.exe, and tile graphics are loaded automatically from the loose well BMP files in `OPU\base\tilesets` (or from the game's .vol archives).
 
+## Download
+
+Builds for Windows, macOS and Linux are on the [Releases](https://github.com/leviathan400/OP2MapperQt/releases) page:
+
+- **Windows:** unzip and run `OP2MapperQt.exe` (64-bit; everything needed is in the folder).
+- **macOS:** unzip and open `OP2MapperQt.app` (Apple silicon). The app isn't signed: the first time, right-click it and choose Open.
+- **Linux:** `chmod +x` the `.AppImage` and run it (x86-64).
+
+Settings are kept in `Mapper3.ini` next to the program.
+
 ## Features
 
 **Current version: 0.7.0**, matching OP2Mapper3 0.7.0: the same tools, menus, messages and settings file.
@@ -65,7 +75,7 @@ They snap to each other and to screen edges, remember their positions across mon
 ## Command line
 
 ```
-appOP2Mapper.exe [/op2dir "C:\Games\Outpost 2"] [map file]
+OP2MapperQt.exe [/op2dir "C:\Games\Outpost 2"] [map file]
 ```
 
 `/op2dir` sets the Outpost 2 folder and skips the first-run prompt. A second launch hands its map to the running copy.
@@ -82,7 +92,7 @@ cmake -S OP2Mapper -B build -DCMAKE_PREFIX_PATH=<path-to-Qt>
 cmake --build build
 ```
 
-Every push is built on Windows (MSVC), Linux (GCC) and macOS (Clang) by GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)), which checks out OP2Utility and OP2MappingLib at pinned commits. Each run keeps a downloadable build: a ready-to-run Windows folder, a macOS app bundle, and the Linux executable (Qt 6 must be installed to run it). OP2Utility's upstream repository has no CMake files; the app's CMake builds its sources directly in that case.
+Every push is built on Windows (MSVC), Linux (GCC) and macOS (Clang) by GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)), which checks out OP2Utility and OP2MappingLib at pinned commits. Each run keeps ready-to-run packages (Windows zip, macOS app bundle, Linux AppImage). Pushing a `v*` tag also creates a draft release with them attached. OP2Utility's upstream repository has no CMake files; the app's CMake builds its sources directly in that case.
 
 A headless self-test of the editing core can be built with `-DOP2MAPPER_BUILD_SELFTEST=ON`. It needs an Outpost 2 install, and writes rendered images to the output folder:
 

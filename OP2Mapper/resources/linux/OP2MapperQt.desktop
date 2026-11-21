@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=OP2MapperQt
+Comment=Map editor for Outpost 2: Divided Destiny
+Exec=OP2MapperQt %f
+Icon=OP2MapperQt
+Categories=Game;Development;
+Terminal=false

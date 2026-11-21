@@ -151,10 +151,14 @@ message(STATUS "OP2Utility: ${OP2UTIL_DIR}")
 target_link_libraries(op2mapper_core PUBLIC OP2Utility)
 target_compile_definitions(op2mapper_core PUBLIC OP2MAPPER_HAVE_OP2UTILITY=1)
 
+# The program is OP2MapperQt.exe / OP2MapperQt.app / OP2MapperQt.
 set_target_properties(appOP2Mapper PROPERTIES
+    OUTPUT_NAME OP2MapperQt
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE TRUE
-    MACOSX_BUNDLE_BUNDLE_NAME OP2Mapper
+    MACOSX_BUNDLE_BUNDLE_NAME OP2MapperQt
+    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
     MACOSX_BUNDLE_GUI_IDENTIFIER org.outpostuniverse.op2mapperqt
 )
 
