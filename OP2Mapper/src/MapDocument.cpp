@@ -1,20 +1,23 @@
 #include "MapDocument.h"
 
-#include "TileClipboard.h"
+#include "CellTypeInfo.h"
 #include "TileImageCache.h"
 
-#include <OP2Utility.h>
+#include <Stream/DynamicMemoryWriter.h>
 
 #include <QCoreApplication>
-#include <QUndoCommand>
+#include <QDir>
+#include <QFile>
+#include <QSaveFile>
 #include <QUndoStack>
 
 #include <exception>
+#include <stdexcept>
 
 namespace {
 
-// Replicates Map::GetTileIndex (private in OP2Utility). Maps use 32-tile-wide
-// column blocks, so storage is (upperX * height + y) * 32 + lowerX.
+// Replicates Map::GetTileIndex (private in OP2Utility): 32-tile-wide column
+// blocks, storage index (upperX * height + y) * 32 + lowerX.
 std::size_t tileIndex(const OP2Utility::Map &map, int x, int y)
 {
     const std::size_t lowerX = static_cast<std::size_t>(x) & 0x1F;
@@ -22,379 +25,570 @@ std::size_t tileIndex(const OP2Utility::Map &map, int x, int y)
     return (upperX * map.HeightInTiles() + static_cast<std::size_t>(y)) * 32 + lowerX;
 }
 
-// ---- Undo commands ----------------------------------------------------------
-//
-// Each command captures the previous state lazily on the first redo() call.
-// That makes construction cheap (just stores the desired new value) and means
-// the document doesn't need to be probed twice when MapView pushes a command
-// from inside a paint loop.
-
-class PaintTileCommand : public QUndoCommand
-{
-public:
-    PaintTileCommand(MapDocument *doc, int x, int y, int tilesetIdx, int imageIdx)
-        : m_doc(doc), m_x(x), m_y(y),
-          m_newTileset(tilesetIdx), m_newImage(imageIdx)
-    {
-        setText(QCoreApplication::translate("MapDocument", "Paint tile"));
-    }
-
-    void redo() override
-    {
-        if (!m_captured) {
-            m_oldMappingIdx = m_doc->mappingIndexAt(m_x, m_y);
-            m_captured = true;
-        }
-        m_doc->applyPaintTileGraphic(m_x, m_y, m_newTileset, m_newImage);
-    }
-
-    void undo() override
-    {
-        m_doc->setMappingIndexAt(m_x, m_y, m_oldMappingIdx);
-    }
-
-private:
-    MapDocument *m_doc;
-    int m_x;
-    int m_y;
-    int m_newTileset;
-    int m_newImage;
-    unsigned m_oldMappingIdx = 0;
-    bool m_captured = false;
-};
-
-class PaintCellTypeCommand : public QUndoCommand
-{
-public:
-    PaintCellTypeCommand(MapDocument *doc, int x, int y, OP2Utility::CellType ct)
-        : m_doc(doc), m_x(x), m_y(y), m_newType(ct)
-    {
-        setText(QCoreApplication::translate("MapDocument", "Paint cell type"));
-    }
-
-    void redo() override
-    {
-        if (!m_captured) {
-            m_oldType = m_doc->cellTypeAt(m_x, m_y);
-            m_captured = true;
-        }
-        m_doc->setCellTypeAt(m_x, m_y, m_newType);
-    }
-
-    void undo() override
-    {
-        m_doc->setCellTypeAt(m_x, m_y, m_oldType);
-    }
-
-private:
-    MapDocument *m_doc;
-    int m_x;
-    int m_y;
-    OP2Utility::CellType m_newType;
-    OP2Utility::CellType m_oldType{};
-    bool m_captured = false;
-};
-
-class PlaceTilesCommand : public QUndoCommand
-{
-public:
-    PlaceTilesCommand(MapDocument *doc, int x0, int y0, TileClipboard clip)
-        : m_doc(doc), m_x0(x0), m_y0(y0), m_clip(std::move(clip))
-    {
-        setText(QCoreApplication::translate("MapDocument", "Paste tiles"));
-    }
-
-    void redo() override
-    {
-        const int W = m_clip.width();
-        const int H = m_clip.height();
-        const int mapW = m_doc->widthTiles();
-        const int mapH = m_doc->heightTiles();
-
-        if (!m_captured) {
-            m_old.assign(static_cast<std::size_t>(W * H), {});
-            for (int dy = 0; dy < H; ++dy) {
-                for (int dx = 0; dx < W; ++dx) {
-                    const int x = m_x0 + dx;
-                    const int y = m_y0 + dy;
-                    auto &o = m_old[dy * W + dx];
-                    // Mirror redo's bounds exactly (including the protected
-                    // bottom row) so undo restores precisely the cells redo
-                    // wrote — nothing more, nothing less.
-                    if (x < 0 || y < 0 || x >= mapW || y >= mapH - 1) {
-                        o.outOfBounds = true;
-                        continue;
-                    }
-                    o.mappingIdx = m_doc->mappingIndexAt(x, y);
-                    o.cellType = static_cast<int>(m_doc->cellTypeAt(x, y));
-                }
-            }
-            m_captured = true;
-        }
-
-        const bool applyCellTypes = m_clip.hasCellTypes();
-        for (int dy = 0; dy < H; ++dy) {
-            for (int dx = 0; dx < W; ++dx) {
-                const auto &c = m_clip.at(dx, dy);
-                if (c.tilesetIdx < 0 || c.imageIdx < 0)
-                    continue; // skip-cell
-                const int x = m_x0 + dx;
-                const int y = m_y0 + dy;
-                if (x < 0 || y < 0 || x >= mapW || y >= mapH - 1)
-                    continue; // bottom-row protection
-                m_doc->applyPaintTileGraphic(x, y, c.tilesetIdx, c.imageIdx);
-                if (applyCellTypes) {
-                    m_doc->setCellTypeAt(x, y,
-                        static_cast<OP2Utility::CellType>(c.cellType));
-                }
-            }
-        }
-    }
-
-    void undo() override
-    {
-        const int W = m_clip.width();
-        const int H = m_clip.height();
-        const bool applyCellTypes = m_clip.hasCellTypes();
-        for (int dy = 0; dy < H; ++dy) {
-            for (int dx = 0; dx < W; ++dx) {
-                const auto &o = m_old[dy * W + dx];
-                if (o.outOfBounds)
-                    continue;
-                const int x = m_x0 + dx;
-                const int y = m_y0 + dy;
-                m_doc->setMappingIndexAt(x, y, o.mappingIdx);
-                if (applyCellTypes) {
-                    m_doc->setCellTypeAt(x, y,
-                        static_cast<OP2Utility::CellType>(o.cellType));
-                }
-            }
-        }
-    }
-
-private:
-    struct OldCell {
-        unsigned mappingIdx = 0;
-        int cellType = 0;
-        bool outOfBounds = false;
-    };
-
-    MapDocument *m_doc;
-    int m_x0;
-    int m_y0;
-    TileClipboard m_clip;
-    std::vector<OldCell> m_old;
-    bool m_captured = false;
-};
+QString tr(const char *s) { return QCoreApplication::translate("MapDocument", s); }
 
 } // namespace
+
+// ---- MapCommand -------------------------------------------------------------
+
+void MapCommand::redo()
+{
+    if (m_skipRedo) {
+        m_skipRedo = false;
+        return;
+    }
+    apply();
+    m_doc->flushChanges();
+}
+
+void MapCommand::undo()
+{
+    revert();
+    m_doc->flushChanges();
+}
+
+// ---- MapDocument ------------------------------------------------------------
 
 MapDocument::MapDocument(QObject *parent)
     : QObject(parent)
     , m_undoStack(new QUndoStack(this))
 {
-    connect(m_undoStack, &QUndoStack::cleanChanged,
-            this, [this](bool clean) { emit dirtyChanged(!clean); });
+    m_undoStack->setUndoLimit(MaxUndoSteps);
+    connect(m_undoStack, &QUndoStack::cleanChanged, this, [this] { emitDirtyIfChanged(); });
+    connect(m_undoStack, &QUndoStack::indexChanged, this, [this] {
+        emitDirtyIfChanged();
+        emit undoRedoChanged();
+    });
 }
 
-MapDocument::~MapDocument() = default;
+MapDocument::~MapDocument()
+{
+    for (MapCommand *c : m_stroke)
+        delete c;
+}
+
+QStringList MapDocument::tilesetSubfolders()
+{
+    return { QStringLiteral("OPU/base/tilesets"), QStringLiteral("base/tilesets"),
+             QStringLiteral("tilesets") };
+}
+
+QString MapDocument::resolveTilesetDir(const QString &op2Folder)
+{
+    if (op2Folder.trimmed().isEmpty())
+        return QString();
+    for (const QString &sub : tilesetSubfolders()) {
+        const QString path = QDir(op2Folder).filePath(sub);
+        if (QDir(path).exists())
+            return path;
+    }
+    return QString();
+}
 
 bool MapDocument::load(const QString &mapPath, const QString &op2Folder,
-                       QString &errorOut, QStringList &missingTilesets)
+                       QString &errorOut, MapLoadInfo &info)
 {
     try {
-        auto resources = std::make_unique<OP2Utility::ResourceManager>(op2Folder.toStdString());
-        auto map = std::make_unique<OP2Utility::Map>(
-            OP2Utility::Map::ReadMap(mapPath.toStdString()));
-        auto cache = std::make_unique<TileImageCache>(*resources);
-        missingTilesets = cache->load(map->tilesetSources);
+        return loadMap(readMapFile(mapPath), mapPath, op2Folder, errorOut, info);
+    } catch (const std::exception &e) {
+        errorOut = QString::fromUtf8(e.what());
+        return false;
+    }
+}
 
-        m_resources = std::move(resources);
-        m_map = std::move(map);
-        m_cache = std::move(cache);
-        m_currentPath = mapPath;
+bool MapDocument::loadMap(OP2Utility::Map &&mapIn, const QString &path, const QString &op2Folder,
+                          QString &errorOut, MapLoadInfo &info)
+{
+    try {
+        auto map = std::make_unique<OP2Utility::Map>(std::move(mapIn));
+        const QString mapPath = path;
+        const QString tilesetDir = resolveTilesetDir(op2Folder);
+        std::unique_ptr<OP2Utility::ResourceManager> resources;
+        if (QDir(op2Folder).exists()) {
+            try {
+                resources = std::make_unique<OP2Utility::ResourceManager>(
+                    QDir::toNativeSeparators(op2Folder).toStdString());
+            } catch (const std::exception &) {
+                resources.reset(); // archives are only a fallback
+            }
+        }
+        auto cache = std::make_unique<TileImageCache>(resources.get(), tilesetDir);
+        MapLoadInfo li;
+        li.missingTilesets = cache->load(map->tilesetSources);
+        li.tilesetDir = tilesetDir;
+        li.tilesetDirFound = !tilesetDir.isEmpty();
+        li.tilesetsTotal = cache->sourceCount();
+        li.tilesetsLoaded = cache->loadedCount();
+
+        // Commit.
+        for (MapCommand *c : m_stroke)
+            delete c;
+        m_stroke.clear();
+        m_strokeOpen = false;
         m_undoStack->clear();
+        m_cache = std::move(cache);
+        m_map = std::move(map);
+        m_resources = std::move(resources);
+        m_currentPath = mapPath;
+        m_pending = QRect();
         m_undoStack->setClean();
+        info = li;
+        m_lastDirty = false;
+        emit documentReplaced();
+        emit dirtyChanged(false);
+        emit undoRedoChanged();
         return true;
     } catch (const std::exception &e) {
         errorOut = QString::fromUtf8(e.what());
-        m_map.reset();
-        m_cache.reset();
-        m_resources.reset();
         return false;
     }
 }
 
 void MapDocument::reset()
 {
+    for (MapCommand *c : m_stroke)
+        delete c;
+    m_stroke.clear();
+    m_strokeOpen = false;
     m_undoStack->clear();
     m_undoStack->setClean();
-    m_map.reset();
     m_cache.reset();
+    m_map.reset();
     m_resources.reset();
     m_currentPath.clear();
+    m_pending = QRect();
+    m_lastDirty = false;
+    emit documentReplaced();
+    emit dirtyChanged(false);
+    emit undoRedoChanged();
 }
 
-int MapDocument::widthTiles() const
+int MapDocument::widthTiles() const { return m_map ? static_cast<int>(m_map->WidthInTiles()) : 0; }
+int MapDocument::heightTiles() const { return m_map ? static_cast<int>(m_map->HeightInTiles()) : 0; }
+int MapDocument::mappingCount() const { return m_map ? static_cast<int>(m_map->tileMappings.size()) : 0; }
+
+bool MapDocument::inBounds(int x, int y) const
 {
-    return m_map ? static_cast<int>(m_map->WidthInTiles()) : 0;
+    return m_map && x >= 0 && y >= 0 && x < widthTiles() && y < heightTiles();
 }
 
-int MapDocument::heightTiles() const
+int MapDocument::cellTypeAt(int x, int y) const
 {
-    return m_map ? static_cast<int>(m_map->HeightInTiles()) : 0;
-}
-
-OP2Utility::CellType MapDocument::cellTypeAt(int x, int y) const
-{
-    if (!m_map || x < 0 || y < 0 || x >= widthTiles() || y >= heightTiles())
-        return OP2Utility::CellType::FastPassible1;
-    return m_map->GetCellType(static_cast<std::size_t>(x), static_cast<std::size_t>(y));
-}
-
-unsigned MapDocument::mappingIndexAt(int x, int y) const
-{
-    if (!m_map || x < 0 || y < 0 || x >= widthTiles() || y >= heightTiles())
+    if (!inBounds(x, y))
         return 0;
     const std::size_t idx = tileIndex(*m_map, x, y);
     if (idx >= m_map->tiles.size())
         return 0;
-    return m_map->tiles[idx].tileMappingIndex;
+    return static_cast<int>(m_map->tiles[idx].cellType) & 0x1F;
 }
 
-void MapDocument::setMappingIndexAt(int x, int y, unsigned mappingIndex)
+int MapDocument::mappingIndexAt(int x, int y) const
 {
-    if (!m_map || x < 0 || y < 0 || x >= widthTiles() || y >= heightTiles())
-        return;
+    if (!inBounds(x, y))
+        return -1;
     const std::size_t idx = tileIndex(*m_map, x, y);
     if (idx >= m_map->tiles.size())
-        return;
-    if (m_map->tiles[idx].tileMappingIndex == mappingIndex)
-        return;
-    m_map->tiles[idx].tileMappingIndex = mappingIndex;
-    emit tileChanged(x, y);
+        return -1;
+    return static_cast<int>(m_map->tiles[idx].tileMappingIndex);
 }
 
-void MapDocument::setCellTypeAt(int x, int y, OP2Utility::CellType ct)
+int MapDocument::tilesetIndexOfMapping(int mapping) const
 {
-    if (!m_map || x < 0 || y < 0 || x >= widthTiles() || y >= heightTiles())
-        return;
-    const std::size_t sx = static_cast<std::size_t>(x);
-    const std::size_t sy = static_cast<std::size_t>(y);
-    if (m_map->GetCellType(sx, sy) == ct)
-        return;
-    m_map->SetCellType(ct, sx, sy);
-    emit tileChanged(x, y);
+    if (!m_map || mapping < 0 || mapping >= mappingCount())
+        return -1;
+    return m_map->tileMappings[static_cast<std::size_t>(mapping)].tilesetIndex;
 }
 
-bool MapDocument::applyPaintTileGraphic(int x, int y, int tilesetIdx, int imageIdx)
+int MapDocument::imageIndexOfMapping(int mapping) const
 {
-    if (!m_map || x < 0 || y < 0 || x >= widthTiles() || y >= heightTiles())
-        return false;
-    if (tilesetIdx < 0 || imageIdx < 0)
-        return false;
-
-    int found = -1;
-    for (std::size_t i = 0; i < m_map->tileMappings.size(); ++i) {
-        const auto &m = m_map->tileMappings[i];
-        if (m.tilesetIndex == tilesetIdx && m.tileGraphicIndex == imageIdx) {
-            found = static_cast<int>(i);
-            break;
-        }
-    }
-
-    // tileMappingIndex is an 11-bit bitfield → 2048 max entries.
-    constexpr std::size_t kMaxMappings = 2048;
-    if (found < 0) {
-        if (m_map->tileMappings.size() >= kMaxMappings)
-            return false;
-        OP2Utility::TileMapping nm{};
-        nm.tilesetIndex = static_cast<uint16_t>(tilesetIdx);
-        nm.tileGraphicIndex = static_cast<uint16_t>(imageIdx);
-        nm.animationCount = 1;
-        nm.animationDelay = 0;
-        m_map->tileMappings.push_back(nm);
-        found = static_cast<int>(m_map->tileMappings.size()) - 1;
-    }
-
-    const std::size_t idx = tileIndex(*m_map, x, y);
-    if (idx >= m_map->tiles.size())
-        return false;
-    if (static_cast<int>(m_map->tiles[idx].tileMappingIndex) == found)
-        return false;
-    m_map->tiles[idx].tileMappingIndex = static_cast<unsigned>(found);
-    emit tileChanged(x, y);
-    return true;
+    if (!m_map || mapping < 0 || mapping >= mappingCount())
+        return -1;
+    return m_map->tileMappings[static_cast<std::size_t>(mapping)].tileGraphicIndex;
 }
 
-bool MapDocument::wouldPaintTileChange(int x, int y, int tilesetIdx, int imageIdx) const
+QString MapDocument::tilesetNameOfMapping(int mapping) const
 {
-    // Bounds + bottom-row protection in one check: y == heightTiles()-1 is
-    // OP2's special impassable border row, which the editor never modifies.
-    if (!m_map || x < 0 || y < 0 || x >= widthTiles() || y >= heightTiles() - 1)
-        return false;
-    if (tilesetIdx < 0 || imageIdx < 0)
-        return false;
-    // If a mapping for (tilesetIdx, imageIdx) already exists and the tile
-    // already points at it, painting is a no-op. Critical for drag-paints
-    // that sweep over already-painted tiles.
+    const int ts = tilesetIndexOfMapping(mapping);
+    if (ts < 0 || static_cast<std::size_t>(ts) >= m_map->tilesetSources.size())
+        return QString();
+    return QString::fromStdString(m_map->tilesetSources[static_cast<std::size_t>(ts)].tilesetFilename);
+}
+
+int MapDocument::findMapping(int tilesetIdx, int imageIdx) const
+{
+    if (!m_map)
+        return -1;
     for (std::size_t i = 0; i < m_map->tileMappings.size(); ++i) {
         const auto &m = m_map->tileMappings[i];
         if (m.tilesetIndex == tilesetIdx && m.tileGraphicIndex == imageIdx)
-            return mappingIndexAt(x, y) != i;
+            return static_cast<int>(i);
     }
-    // No existing mapping — painting will insert one, unless the 11-bit
-    // tileMappingIndex bitfield is already saturated (2048 entries).
-    return m_map->tileMappings.size() < 2048;
+    return -1;
 }
 
-bool MapDocument::wouldPaintCellTypeChange(int x, int y, OP2Utility::CellType ct) const
+void MapDocument::noteChanged(int x, int y)
 {
-    // Same bounds + bottom-row-protection combo as wouldPaintTileChange.
-    if (!m_map || x < 0 || y < 0 || x >= widthTiles() || y >= heightTiles() - 1)
-        return false;
-    return cellTypeAt(x, y) != ct;
+    m_pending = m_pending.isNull() ? QRect(x, y, 1, 1) : m_pending.united(QRect(x, y, 1, 1));
 }
 
-void MapDocument::pushPaintTile(int x, int y, int tilesetIdx, int imageIdx)
+void MapDocument::setMappingIndexAt(int x, int y, int mapping)
 {
-    if (!wouldPaintTileChange(x, y, tilesetIdx, imageIdx))
+    if (!inBounds(x, y) || mapping < 0 || mapping >= 2048)
         return;
-    m_undoStack->push(new PaintTileCommand(this, x, y, tilesetIdx, imageIdx));
+    const std::size_t idx = tileIndex(*m_map, x, y);
+    if (idx >= m_map->tiles.size())
+        return;
+    if (static_cast<int>(m_map->tiles[idx].tileMappingIndex) == mapping)
+        return;
+    m_map->tiles[idx].tileMappingIndex = static_cast<unsigned>(mapping);
+    noteChanged(x, y);
 }
 
-void MapDocument::pushPaintCellType(int x, int y, OP2Utility::CellType ct)
+void MapDocument::setCellTypeAt(int x, int y, int cellType)
 {
-    if (!wouldPaintCellTypeChange(x, y, ct))
+    if (!inBounds(x, y) || cellType < 0 || cellType >= CellTypeInfo::Count)
         return;
-    m_undoStack->push(new PaintCellTypeCommand(this, x, y, ct));
+    const std::size_t idx = tileIndex(*m_map, x, y);
+    if (idx >= m_map->tiles.size())
+        return;
+    if ((static_cast<int>(m_map->tiles[idx].cellType) & 0x1F) == cellType)
+        return;
+    m_map->tiles[idx].cellType = static_cast<OP2Utility::CellType>(cellType);
+    noteChanged(x, y);
 }
 
-void MapDocument::pushPlaceTiles(int x0, int y0, const TileClipboard &clip)
+void MapDocument::flushChanges()
 {
-    if (!m_map || clip.isEmpty())
+    if (m_pending.isNull())
         return;
-    m_undoStack->push(new PlaceTilesCommand(this, x0, y0, clip));
+    const QRect r = m_pending;
+    m_pending = QRect();
+    emit regionChanged(r);
 }
+
+void MapDocument::execute(MapCommand *cmd)
+{
+    if (!m_map) {
+        delete cmd;
+        return;
+    }
+    try {
+        cmd->apply();
+    } catch (...) {
+        flushChanges();
+        delete cmd;
+        throw;
+    }
+    flushChanges();
+    if (m_strokeOpen) {
+        m_stroke.push_back(cmd);
+        emitDirtyIfChanged();
+    } else {
+        cmd->markApplied();
+        m_undoStack->push(cmd);
+    }
+    emit edited();
+}
+
+void MapDocument::beginStroke(const QString &description)
+{
+    endStroke();
+    m_strokeOpen = true;
+    m_strokeDescription = description;
+}
+
+void MapDocument::endStroke()
+{
+    if (!m_strokeOpen)
+        return;
+    m_strokeOpen = false;
+    std::vector<MapCommand *> cmds;
+    cmds.swap(m_stroke);
+    if (cmds.empty())
+        return;
+    MapCommand *top = nullptr;
+    if (cmds.size() == 1) {
+        top = cmds.front();
+    } else {
+        const QString text = m_strokeDescription.isEmpty()
+            ? tr("Paint (%1 tiles)").arg(cmds.size())
+            : m_strokeDescription;
+        top = new CompositeCommand(this, std::move(cmds), text);
+    }
+    top->markApplied();
+    m_undoStack->push(top);
+}
+
+void MapDocument::undo()
+{
+    endStroke();
+    if (!m_undoStack->canUndo())
+        return;
+    m_undoStack->undo();
+    emit edited();
+}
+
+void MapDocument::redo()
+{
+    endStroke();
+    if (!m_undoStack->canRedo())
+        return;
+    m_undoStack->redo();
+    emit edited();
+}
+
+QString MapDocument::undoText() const { return m_undoStack->undoText(); }
+QString MapDocument::redoText() const { return m_undoStack->redoText(); }
+bool MapDocument::canUndo() const { return m_undoStack->canUndo(); }
+bool MapDocument::canRedo() const { return m_undoStack->canRedo(); }
 
 bool MapDocument::isDirty() const
 {
-    return !m_undoStack->isClean();
+    if (!m_map)
+        return false;
+    return !m_undoStack->isClean() || !m_stroke.empty();
+}
+
+void MapDocument::emitDirtyIfChanged()
+{
+    const bool d = isDirty();
+    if (d != m_lastDirty) {
+        m_lastDirty = d;
+        emit dirtyChanged(d);
+    }
+}
+
+void MapDocument::markSavePoint()
+{
+    endStroke();
+    m_undoStack->setClean();
+    emitDirtyIfChanged();
+}
+
+void MapDocument::markNewUnsaved()
+{
+    m_undoStack->resetClean();
+    emitDirtyIfChanged();
 }
 
 bool MapDocument::save(const QString &path, QString &errorOut)
 {
     if (!m_map) {
-        errorOut = QStringLiteral("No map loaded");
+        errorOut = tr("No map loaded");
         return false;
     }
+    endStroke();
     try {
-        m_map->Write(path.toStdString());
-        m_currentPath = path;
-        m_undoStack->setClean();
-        return true;
+        writeMapFileSafely(*m_map, path);
     } catch (const std::exception &e) {
         errorOut = QString::fromUtf8(e.what());
         return false;
     }
+    m_currentPath = path;
+    markSavePoint();
+    return true;
+}
+
+OP2Utility::Map MapDocument::readMapFile(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        throw std::runtime_error(QStringLiteral("Cannot open %1: %2")
+                                     .arg(QDir::toNativeSeparators(path), f.errorString())
+                                     .toStdString());
+    const QByteArray bytes = f.readAll();
+    OP2Utility::Stream::MemoryReader reader(bytes.constData(),
+                                            static_cast<std::size_t>(bytes.size()));
+    return OP2Utility::Map::ReadMap(reader);
+}
+
+void MapDocument::writeMapFileSafely(const OP2Utility::Map &map, const QString &path)
+{
+    OP2Utility::Stream::DynamicMemoryWriter writer;
+    map.Write(writer);
+    auto reader = writer.GetReader();
+    const auto length = reader.Length();
+    QByteArray bytes(static_cast<qsizetype>(length), Qt::Uninitialized);
+    reader.Read(bytes.data(), static_cast<std::size_t>(length));
+
+    {
+        OP2Utility::Stream::MemoryReader check(bytes.constData(),
+                                               static_cast<std::size_t>(bytes.size()));
+        const OP2Utility::Map verify = OP2Utility::Map::ReadMap(check);
+        if (verify.WidthInTiles() != map.WidthInTiles()
+            || verify.HeightInTiles() != map.HeightInTiles()
+            || verify.tiles.size() != map.tiles.size()
+            || verify.tileMappings.size() != map.tileMappings.size())
+            throw std::runtime_error("The written map did not read back correctly; the file was not replaced.");
+    }
+
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly))
+        throw std::runtime_error(QStringLiteral("Cannot write %1: %2")
+                                     .arg(QDir::toNativeSeparators(path), out.errorString())
+                                     .toStdString());
+    if (out.write(bytes) != bytes.size() || !out.commit())
+        throw std::runtime_error(QStringLiteral("Failed to write %1: %2")
+                                     .arg(QDir::toNativeSeparators(path), out.errorString())
+                                     .toStdString());
+}
+
+// ---- Commands ---------------------------------------------------------------
+
+ChangeTileMappingCommand::ChangeTileMappingCommand(MapDocument *doc, int x, int y,
+                                                   int oldMapping, int newMapping)
+    : MapCommand(doc), m_x(x), m_y(y), m_old(oldMapping), m_new(newMapping)
+{
+    setText(tr("Change tile at (%1,%2) from mapping %3 to %4").arg(x).arg(y).arg(oldMapping).arg(newMapping));
+}
+void ChangeTileMappingCommand::apply() { m_doc->setMappingIndexAt(m_x, m_y, m_new); }
+void ChangeTileMappingCommand::revert() { m_doc->setMappingIndexAt(m_x, m_y, m_old); }
+
+ChangeCellTypeCommand::ChangeCellTypeCommand(MapDocument *doc, int x, int y, int oldType, int newType)
+    : MapCommand(doc), m_x(x), m_y(y), m_old(oldType), m_new(newType)
+{
+    setText(tr("Change cell type at (%1,%2) from %3 to %4")
+                .arg(x).arg(y).arg(CellTypeInfo::enumName(oldType), CellTypeInfo::enumName(newType)));
+}
+void ChangeCellTypeCommand::apply() { m_doc->setCellTypeAt(m_x, m_y, m_new); }
+void ChangeCellTypeCommand::revert() { m_doc->setCellTypeAt(m_x, m_y, m_old); }
+
+PasteTilesCommand::PasteTilesCommand(MapDocument *doc, int x0, int y0, int w, int h,
+                                     std::vector<int> mappings, std::vector<int> cellTypes)
+    : MapCommand(doc), m_x0(x0), m_y0(y0), m_w(w), m_h(h),
+      m_new(std::move(mappings)), m_newCells(std::move(cellTypes))
+{
+    m_old.resize(static_cast<std::size_t>(w * h));
+    if (!m_newCells.empty())
+        m_oldCells.resize(static_cast<std::size_t>(w * h));
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const std::size_t i = static_cast<std::size_t>(y * w + x);
+            m_old[i] = doc->mappingIndexAt(x0 + x, y0 + y);
+            if (!m_oldCells.empty())
+                m_oldCells[i] = doc->cellTypeAt(x0 + x, y0 + y);
+        }
+    }
+    setText(m_newCells.empty() ? tr("Paste %1x%2 Tiles").arg(w).arg(h)
+                               : tr("Paste %1x%2 Tiles + Cell Types").arg(w).arg(h));
+}
+
+void PasteTilesCommand::apply()
+{
+    const int lastRow = m_doc->lastRow();
+    for (int y = 0; y < m_h; ++y) {
+        for (int x = 0; x < m_w; ++x) {
+            const std::size_t i = static_cast<std::size_t>(y * m_w + x);
+            m_doc->setMappingIndexAt(m_x0 + x, m_y0 + y, m_new[i]);
+            if (!m_newCells.empty() && m_y0 + y != lastRow)
+                m_doc->setCellTypeAt(m_x0 + x, m_y0 + y, m_newCells[i]);
+        }
+    }
+}
+
+void PasteTilesCommand::revert()
+{
+    for (int y = 0; y < m_h; ++y) {
+        for (int x = 0; x < m_w; ++x) {
+            const std::size_t i = static_cast<std::size_t>(y * m_w + x);
+            m_doc->setMappingIndexAt(m_x0 + x, m_y0 + y, m_old[i]);
+            if (!m_oldCells.empty())
+                m_doc->setCellTypeAt(m_x0 + x, m_y0 + y, m_oldCells[i]);
+        }
+    }
+}
+
+PlaceTileGroupCommand::PlaceTileGroupCommand(MapDocument *doc, int x0, int y0, int w, int h,
+                                             std::vector<int> mappings, const QString &name)
+    : MapCommand(doc), m_x0(x0), m_y0(y0), m_w(w), m_h(h), m_new(std::move(mappings))
+{
+    m_old.resize(static_cast<std::size_t>(w * h));
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            m_old[static_cast<std::size_t>(y * w + x)] = doc->mappingIndexAt(x0 + x, y0 + y);
+    setText(name.isEmpty()
+        ? tr("Place Tile Group (%1×%2 tiles)").arg(w).arg(h)
+        : tr("Place Tile Group '%1' (%2×%3 tiles)").arg(name).arg(w).arg(h));
+}
+
+void PlaceTileGroupCommand::apply()
+{
+    for (int y = 0; y < m_h; ++y)
+        for (int x = 0; x < m_w; ++x)
+            m_doc->setMappingIndexAt(m_x0 + x, m_y0 + y, m_new[static_cast<std::size_t>(y * m_w + x)]);
+}
+
+void PlaceTileGroupCommand::revert()
+{
+    for (int y = 0; y < m_h; ++y)
+        for (int x = 0; x < m_w; ++x)
+            m_doc->setMappingIndexAt(m_x0 + x, m_y0 + y, m_old[static_cast<std::size_t>(y * m_w + x)]);
+}
+
+CompositeCommand::CompositeCommand(MapDocument *doc, std::vector<MapCommand *> commands,
+                                   const QString &text)
+    : MapCommand(doc), m_commands(std::move(commands))
+{
+    setText(text);
+}
+
+CompositeCommand::~CompositeCommand()
+{
+    for (MapCommand *c : m_commands)
+        delete c;
+}
+
+void CompositeCommand::apply()
+{
+    for (MapCommand *c : m_commands)
+        c->apply();
+}
+
+void CompositeCommand::revert()
+{
+    for (auto it = m_commands.rbegin(); it != m_commands.rend(); ++it)
+        (*it)->revert();
+}
+
+TileChangesCommand::TileChangesCommand(MapDocument *doc, std::vector<TileChange> changes,
+                                       const QString &text)
+    : MapCommand(doc), m_changes(std::move(changes))
+{
+    setText(text);
+}
+
+void TileChangesCommand::apply()
+{
+    for (const auto &c : m_changes) {
+        m_doc->setMappingIndexAt(c.x, c.y, c.newMapping);
+        m_doc->setCellTypeAt(c.x, c.y, c.newCellType);
+    }
+}
+
+void TileChangesCommand::revert()
+{
+    for (auto it = m_changes.rbegin(); it != m_changes.rend(); ++it) {
+        m_doc->setMappingIndexAt(it->x, it->y, it->oldMapping);
+        m_doc->setCellTypeAt(it->x, it->y, it->oldCellType);
+    }
+}
+
+ChangeCellTypesBulkCommand::ChangeCellTypesBulkCommand(MapDocument *doc,
+                                                       std::vector<CellTypeChange> changes,
+                                                       const QString &text)
+    : MapCommand(doc), m_changes(std::move(changes))
+{
+    setText(text);
+}
+
+void ChangeCellTypesBulkCommand::apply()
+{
+    for (const auto &c : m_changes)
+        m_doc->setCellTypeAt(c.x, c.y, c.newType);
+}
+
+void ChangeCellTypesBulkCommand::revert()
+{
+    for (const auto &c : m_changes)
+        m_doc->setCellTypeAt(c.x, c.y, c.oldType);
 }

@@ -1,164 +1,126 @@
 #include "MiniMap.h"
 
+#include "Editor.h"
 #include "MapDocument.h"
+#include "MapRenderer.h"
 #include "TileImageCache.h"
 
-#include <OP2Utility.h>
-
-#include <QHash>
 #include <QMouseEvent>
 #include <QPainter>
 
-namespace { constexpr int T = TileImageCache::TileSize; }
+#include <algorithm>
+#include <cmath>
 
-MiniMap::MiniMap(QWidget *parent)
-    : QWidget(parent, Qt::Window)
+MiniMap::MiniMap(Editor *editor, QWidget *mainWindow)
+    : ToolPalette(QStringLiteral("MiniMap"), QStringLiteral("fMiniMap"), mainWindow)
+    , m_editor(editor)
 {
-    setWindowTitle(tr("Minimap"));
-    setAttribute(Qt::WA_DeleteOnClose, false);
+    setWindowTitle(tr("Mini Map"));
+    setFixedSize(433, 355);
+    m_refreshTimer.setSingleShot(true);
+    m_refreshTimer.setInterval(300);
+    connect(&m_refreshTimer, &QTimer::timeout, this, &MiniMap::refreshThumbnail);
 }
 
-void MiniMap::setDocument(const MapDocument *doc)
+void MiniMap::scheduleRefresh()
 {
-    m_doc = doc;
-    rebuildThumbnail();
+    if (isVisible())
+        m_refreshTimer.start();
+}
 
-    if (!m_doc || !m_doc->isLoaded()) {
-        m_viewportScene = QRectF();
-        hide();
-        return;
-    }
-
-    // Pick a display scale so the window fits a reasonable max size.
-    constexpr int maxDim = 512;
-    const int w = m_doc->widthTiles();
-    const int h = m_doc->heightTiles();
-    if (w <= 0 || h <= 0) {
-        hide();
-        return;
-    }
-    m_pxPerTile = std::max(1, std::min(maxDim / w, maxDim / h));
-    if (m_pxPerTile < 1) m_pxPerTile = 1;
-
-    setFixedSize(w * m_pxPerTile, h * m_pxPerTile);
+void MiniMap::clearThumbnail()
+{
+    m_thumb = QImage();
+    m_thumbBounds = QRect();
     update();
 }
 
-void MiniMap::setViewportRect(const QRectF &sceneRect)
+void MiniMap::refreshThumbnail()
 {
-    m_viewportScene = sceneRect;
+    const MapDocument *doc = m_editor->document();
+    if (!doc || !doc->isLoaded()) {
+        clearThumbnail();
+        return;
+    }
+    const int W = doc->widthTiles(), H = doc->heightTiles();
+    const int cw = width(), ch = height();
+    const double displayScale = std::min(cw / double(W * 32), ch / double(H * 32));
+    const int ppt = std::max(1, static_cast<int>(std::ceil(displayScale * 32)));
+    m_thumb = MapRenderer::renderFullMap(*doc, ppt, MapRenderer::GameMap, MapRenderer::Overlays());
+    const int dw = static_cast<int>(std::lround(W * 32 * displayScale));
+    const int dh = static_cast<int>(std::lround(H * 32 * displayScale));
+    m_thumbBounds = QRect((cw - dw) / 2, (ch - dh) / 2, dw, dh);
     update();
 }
 
-void MiniMap::rebuildThumbnail()
+void MiniMap::setViewportTiles(const QRectF &visibleTiles)
 {
-    if (!m_doc || !m_doc->isLoaded() || !m_doc->cache()) {
-        m_thumb = QImage();
+    if (visibleTiles == m_visible)
         return;
-    }
-
-    const auto *map = m_doc->map();
-    const auto *cache = m_doc->cache();
-    const int w = m_doc->widthTiles();
-    const int h = m_doc->heightTiles();
-
-    m_thumb = QImage(w, h, QImage::Format_RGB32);
-    m_thumb.fill(Qt::black);
-
-    // Cache an averaged color per (tilesetIdx, imageIdx) pair — many tiles
-    // reuse the same graphic, so we only compute the mean once per unique tile.
-    QHash<quint32, QRgb> meanCache;
-
-    auto meanColor = [&](std::size_t tsIdx, std::size_t imgIdx) -> QRgb {
-        const quint32 key = (static_cast<quint32>(tsIdx) << 16)
-                          | (static_cast<quint32>(imgIdx) & 0xFFFF);
-        auto it = meanCache.constFind(key);
-        if (it != meanCache.constEnd())
-            return *it;
-
-        const QImage *strip = cache->tileset(tsIdx);
-        if (!strip) {
-            meanCache.insert(key, qRgb(64, 0, 64));
-            return qRgb(64, 0, 64);
-        }
-        const int srcY = static_cast<int>(imgIdx) * T;
-        if (srcY + T > strip->height()) {
-            meanCache.insert(key, qRgb(64, 32, 0));
-            return qRgb(64, 32, 0);
-        }
-
-        quint64 sumR = 0, sumG = 0, sumB = 0;
-        for (int py = 0; py < T; ++py) {
-            const QRgb *line = reinterpret_cast<const QRgb *>(
-                strip->constScanLine(srcY + py));
-            for (int px = 0; px < T; ++px) {
-                const QRgb c = line[px];
-                sumR += qRed(c);
-                sumG += qGreen(c);
-                sumB += qBlue(c);
-            }
-        }
-        constexpr int N = T * T;
-        const QRgb mean = qRgb(static_cast<int>(sumR / N),
-                               static_cast<int>(sumG / N),
-                               static_cast<int>(sumB / N));
-        meanCache.insert(key, mean);
-        return mean;
-    };
-
-    for (int y = 0; y < h; ++y) {
-        QRgb *row = reinterpret_cast<QRgb *>(m_thumb.scanLine(y));
-        for (int x = 0; x < w; ++x) {
-            row[x] = meanColor(map->GetTilesetIndex(x, y),
-                               map->GetImageIndex(x, y));
-        }
-    }
+    m_visible = visibleTiles;
+    update();
 }
 
 void MiniMap::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.fillRect(rect(), Qt::black);
-    if (m_thumb.isNull())
+    if (m_thumb.isNull() || m_thumbBounds.isEmpty())
         return;
+    p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    p.drawImage(m_thumbBounds, m_thumb);
 
-    // Bilinear upscale — softens the per-tile mosaic into smoother terrain.
-    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    p.drawImage(rect(), m_thumb);
-
-    if (!m_viewportScene.isEmpty() && m_doc && m_doc->isLoaded()) {
-        const double sx = static_cast<double>(width()) / (m_doc->widthTiles() * T);
-        const double sy = static_cast<double>(height()) / (m_doc->heightTiles() * T);
-        QRectF box(m_viewportScene.x() * sx,
-                   m_viewportScene.y() * sy,
-                   m_viewportScene.width() * sx,
-                   m_viewportScene.height() * sy);
-        QPen pen(QColor(255, 220, 0));
-        pen.setWidth(2);
-        p.setPen(pen);
-        p.setBrush(Qt::NoBrush);
-        p.drawRect(box.adjusted(1, 1, -1, -1));
-    }
+    const MapDocument *doc = m_editor->document();
+    if (!doc || !doc->isLoaded())
+        return;
+    const int W = doc->widthTiles(), H = doc->heightTiles();
+    const QRectF vis = m_visible.intersected(QRectF(0, 0, W, H));
+    if (vis.isEmpty())
+        return;
+    const double sx = m_thumbBounds.width() / double(W);
+    const double sy = m_thumbBounds.height() / double(H);
+    const double L = m_thumbBounds.x() + vis.left() * sx;
+    const double Tt = m_thumbBounds.y() + vis.top() * sy;
+    const double R = m_thumbBounds.x() + vis.right() * sx;
+    const double B = m_thumbBounds.y() + vis.bottom() * sy;
+    const int rx = static_cast<int>(std::floor(L));
+    const int ry = static_cast<int>(std::floor(Tt));
+    const int rw = std::max(1, static_cast<int>(std::ceil(R)) - rx);
+    const int rh = std::max(1, static_cast<int>(std::ceil(B)) - ry);
+    p.setPen(QPen(QColor(255, 255, 0), 2));
+    p.setBrush(Qt::NoBrush);
+    p.drawRect(rx, ry, rw, rh);
 }
 
-QPointF MiniMap::widgetToScene(QPoint widgetPt) const
+void MiniMap::jumpTo(const QPoint &pos)
 {
-    if (!m_doc || !m_doc->isLoaded())
-        return {};
-    const double sx = static_cast<double>(m_doc->widthTiles() * T) / width();
-    const double sy = static_cast<double>(m_doc->heightTiles() * T) / height();
-    return { widgetPt.x() * sx, widgetPt.y() * sy };
+    const MapDocument *doc = m_editor->document();
+    if (m_thumb.isNull() || !doc || !doc->isLoaded() || m_thumbBounds.isEmpty())
+        return;
+    const int W = doc->widthTiles(), H = doc->heightTiles();
+    const double relX = (pos.x() - m_thumbBounds.x()) / double(m_thumbBounds.width());
+    const double relY = (pos.y() - m_thumbBounds.y()) / double(m_thumbBounds.height());
+    const int tx = std::clamp(static_cast<int>(std::floor(relX * W)), 0, W - 1);
+    const int ty = std::clamp(static_cast<int>(std::floor(relY * H)), 0, H - 1);
+    emit jumpToTile(tx, ty);
 }
 
 void MiniMap::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton)
-        emit centerRequested(widgetToScene(event->pos()));
+    if (event->button() == Qt::LeftButton) {
+        m_dragging = true;
+        jumpTo(event->position().toPoint());
+    }
 }
 
 void MiniMap::mouseMoveEvent(QMouseEvent *event)
 {
-    // Drag to scrub.
-    if (event->buttons() & Qt::LeftButton)
-        emit centerRequested(widgetToScene(event->pos()));
+    if (m_dragging)
+        jumpTo(event->position().toPoint());
+}
+
+void MiniMap::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton)
+        m_dragging = false;
 }

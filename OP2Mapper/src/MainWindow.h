@@ -1,97 +1,131 @@
 #pragma once
 
+#include "NewMapDialog.h"
+
 #include <QMainWindow>
-#include <QRect>
+#include <QStringList>
+#include <QTimer>
 #include <memory>
 
 class CellTypesWindow;
+class Editor;
 class MapDocument;
 class MapView;
 class MiniMap;
-class TileClipboard;
+class Sidebar;
+class TerrainWindow;
 class TileGroupsWindow;
 class TileSelectWindow;
 class TilesetWindow;
+class ToolPalette;
+class QAction;
 class QLabel;
 class QMenu;
+struct MapLoadInfo;
 
-// Application shell. Owns the single MapDocument and TileClipboard for the
-// app's lifetime (both survive map close — the document just reset()s, so
-// QActions bound to its undo stack never dangle), the central MapView, and
-// the five floating tool palettes (MiniMap, TilesetWindow, CellTypesWindow,
-// TileSelectWindow, TileGroupsWindow). Palettes hide when no map is loaded
-// and reappear via finishMapLoadUi() on the next load.
+// Application shell (OP2Mapper3 fMain): menus, map panel, sidebar, status
+// bar, the six tool palettes (shown with Edit Mode), and the file flows.
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();
+    MainWindow();
+    ~MainWindow() override;
 
-private slots:
-    void onNewMap();
-    void onOpenMap();
-    void onCloseMap();
-    void onSaveMap();
-    void onSaveMapAs();
-    void onSetOp2Folder();
-    void onTileHovered(int x, int y);
-    void onZoomChanged(double factor);
-    void onCopyTiles();
-    void onPasteTiles();
-    void onSelectionChanged(QRect tileRect);
-    void onExportToJson();
-    void onImportFromJson();
-    void onLaunchOp2();
-    void onOpenOp2Folder();
-    void onShowSettings();
-    void onShowAbout();
-    void onExportImage();
+    // Startup after construction: command line (/op2dir, map file) and the
+    // first-run folder check. Returns false if the app should exit.
+    bool startup(const QStringList &args);
+    // A second launch forwarded its arguments to this instance.
+    void handleSecondInstance(const QStringList &args);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
-    void dragEnterEvent(QDragEnterEvent *event) override;
-    void dropEvent(QDropEvent *event) override;
+    void moveEvent(QMoveEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private:
-    QString ensureOp2Folder();
-    void updateTitle();
-    bool saveToPath(const QString &path);
-    // Loads map from disk and performs all the after-load UI setup. If
-    // markUntitled is true, clears the document's current path so Save
-    // prompts for a new location (used by File → New).
-    bool loadMapFromPath(const QString &path, bool markUntitled = false);
-    // Shared post-load UI setup (view wiring, palettes, action enables).
-    // Every map-arrival path (open/new/recent/drop/import) must funnel
-    // through this — see the definition for why it must stay one code path.
-    void finishMapLoadUi(const QString &statusText);
-    // If the current map has unsaved changes, asks the user. Returns true
-    // if it's OK to proceed (no changes, Discard, or Save-succeeded); false
-    // if the user cancelled or the save failed.
-    bool confirmDiscardChanges();
-    void rebuildRecentFilesMenu();
+    void buildMenus();
+    void buildStatusBar();
+    void wireSignals();
 
-    MapView *m_mapView = nullptr;
+    // File flows
+    bool ensureOp2Folder();
+    bool loadMapFile(const QString &path, bool includeInRecent);
+    void showTilesetWarnings(const MapLoadInfo &info);
+    bool confirmDiscardChanges();
+    void onNewMap();
+    bool createNewMap(const NewMapDialog::Result &r);
+    void onOpenMap();
+    bool onSaveMap();
+    void onCloseMap();
+    void onSettings();
+    void rebuildRecentMenu();
+    void openDroppedFiles(const QStringList &paths);
+    void onExportJson();
+    void onImportJson();
+
+    // UI refresh
+    void updateTitle();
+    void updateStatus();
+    void updateTileInfo();
+    void updateToolLabels();
+    void updateUndoRedo();
+    void updateZoomLabel();
+    void updateMapActions();
+    void refreshSidebarMap();
+    void syncViewChecks();
+
+    // Edit mode
+    void toggleEditMode();
+    void onEditModeChanged(bool on);
+    QList<ToolPalette *> palettes() const;
+
+    // Image
+    void exportImage(double scale, const QString &suffix, int gridMode);
+    void exportOverview();
+    void takeScreenshot();
+    void configureGrid();
+    QString exportFolder() const;
+
+    void restoreMainPosition();
+    void saveMainPosition();
+
+    std::unique_ptr<MapDocument> m_doc;
+    Editor *m_editor = nullptr;
+    MapView *m_view = nullptr;
+    Sidebar *m_sidebar = nullptr;
+
+    TilesetWindow *m_tileset = nullptr;
+    CellTypesWindow *m_cellTypes = nullptr;
+    TileSelectWindow *m_tileSelect = nullptr;
+    TileGroupsWindow *m_tileGroups = nullptr;
+    MiniMap *m_miniMap = nullptr;
+    TerrainWindow *m_terrain = nullptr;
+
+    QLabel *m_statusName = nullptr;
     QLabel *m_statusPath = nullptr;
     QLabel *m_statusCoords = nullptr;
-    QAction *m_closeAction = nullptr;
-    QAction *m_gridAction = nullptr;
-    QAction *m_largeGridAction = nullptr;
-    QAction *m_coordsAction = nullptr;
-    QAction *m_resetZoomAction = nullptr;
-    QAction *m_saveAction = nullptr;
-    QAction *m_saveAsAction = nullptr;
-    QAction *m_copyAction = nullptr;
-    QAction *m_pasteAction = nullptr;
-    QAction *m_exportJsonAction = nullptr;
-    QMenu *m_recentFilesMenu = nullptr;
-    bool m_copyAfterSelection = false;
-    QLabel *m_statusZoom = nullptr;
-    MiniMap *m_miniMap = nullptr;
-    TilesetWindow *m_tilesetWindow = nullptr;
-    CellTypesWindow *m_cellTypesWindow = nullptr;
-    TileSelectWindow *m_tileSelectWindow = nullptr;
-    TileGroupsWindow *m_tileGroupsWindow = nullptr;
-    std::unique_ptr<MapDocument> m_doc;
-    std::unique_ptr<TileClipboard> m_clipboard;
+
+    QAction *m_saveAct = nullptr;
+    QAction *m_closeAct = nullptr;
+    QAction *m_exportJsonAct = nullptr;
+    QAction *m_undoAct = nullptr;
+    QAction *m_redoAct = nullptr;
+    QAction *m_copyAct = nullptr;
+    QAction *m_pasteAct = nullptr;
+    QAction *m_pasteCellsAct = nullptr;
+    QAction *m_singleTileAct = nullptr;
+    QAction *m_highlightAct = nullptr;
+    QAction *m_gridAct = nullptr;
+    QAction *m_largeGridAct = nullptr;
+    QAction *m_coordsAct = nullptr;
+    QAction *m_zoomAct = nullptr;
+    QAction *m_onTopAct = nullptr;
+    QMenu *m_recentMenu = nullptr;
+    QMenu *m_renderMenu = nullptr;
+    QMenu *m_imageMenu = nullptr;
+
+    QTimer m_positionTimer;
+    bool m_positionRestored = false;
 };

@@ -45,6 +45,10 @@ ui_*.h
 *.idb
 *.exp
 
+# Bundled OP2Launcher binaries are part of the source (embedded as resources)
+!OP2Mapper/resources/op2launcher/*.exe
+!OP2Mapper/resources/op2launcher/*.dll
+
 # ---- Visual Studio / VS Code ----
 .vs/
 .vscode/

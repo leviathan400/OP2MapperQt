@@ -1,60 +1,52 @@
 #pragma once
 
-#include <QWidget>
+#include "ToolPalette.h"
 
+#include <QImage>
+
+class Editor;
 class QComboBox;
 class QLabel;
-class QPushButton;
+class QScrollArea;
+class TileGroupsPreview;
 
-// Tool palette mirroring VB fTileGroups.vb. Two combos drive selection:
-// Folder (category subdir, with "(Default)" for loose root JSONs) and
-// Tile Group (the .json file). Selecting a group loads its BMP preview
-// and shows header details on the right. Place button emits a signal
-// that MainWindow handles by entering paste mode with the group's
-// resolved clipboard contents.
-class TileGroupsWindow : public QWidget
+// "Tile Groups" palette (OP2Mapper3 fTileGroups, tool 4): browse the tile
+// group library (subfolders of the Tilegroups folder, "(Default)" for loose
+// files), preview a group against the current map, and place it.
+class TileGroupsWindow : public ToolPalette
 {
     Q_OBJECT
 public:
-    explicit TileGroupsWindow(QWidget *parent = nullptr);
+    TileGroupsWindow(Editor *editor, QWidget *mainWindow);
 
-    // Re-scan the tile-groups path from Settings. If selectFolder is
-    // non-empty, switch to that folder afterwards (used by export-then-
-    // refresh to auto-select "Exported").
-    void refresh(const QString &selectFolder = QString());
-
-signals:
-    // Fired when the user clicks Place with a valid selection. Absolute path.
-    void placeRequested(const QString &jsonPath);
+    // Re-read the Tilegroups folder; optionally select a folder by name
+    // (and rescan it even if it was already selected).
+    void refreshFromDisk(const QString &selectFolder = QString());
 
 protected:
-    void closeEvent(QCloseEvent *event) override;
-    void keyPressEvent(QKeyEvent *event) override;
-
-private slots:
-    void onFolderChanged(int folderRow);
-    void onGroupChanged(int groupRow);
-    void onPlaceClicked();
+    void showEvent(QShowEvent *event) override;
 
 private:
-    QString folderPath(int folderRow) const;
-    QString currentJsonPath() const;
-    void populateGroupsForCurrentFolder();
-    void updateDetailsAndPreview();
-    void saveGeometry();
-    void restoreGeometry();
+    friend class TileGroupsPreview;
+    void loadFolders();
+    void onFolderChanged();
+    void onGroupChanged();
+    void resetLabels();
+    void renderPreview();
 
+    Editor *m_editor;
+    QString m_root;
+    bool m_noGroupsAvailable = true;
     QComboBox *m_folderCombo = nullptr;
     QComboBox *m_groupCombo = nullptr;
-    QLabel *m_previewLabel = nullptr;
+    QScrollArea *m_scroll = nullptr;
+    TileGroupsPreview *m_preview = nullptr;
     QLabel *m_pathLabel = nullptr;
-
     QLabel *m_countValue = nullptr;
     QLabel *m_tilesetValue = nullptr;
     QLabel *m_nameValue = nullptr;
     QLabel *m_widthValue = nullptr;
     QLabel *m_heightValue = nullptr;
     QLabel *m_notesValue = nullptr;
-
-    QPushButton *m_placeButton = nullptr;
+    QImage m_previewImage;
 };

@@ -1,313 +1,296 @@
 #include "TileGroupsWindow.h"
 
+#include "Editor.h"
+#include "MapDocument.h"
+#include "MapRenderer.h"
 #include "Settings.h"
+#include "TileGroupIO.h"
+#include "TileImageCache.h"
 
-#include <QCloseEvent>
 #include <QComboBox>
 #include <QDir>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QGridLayout>
-#include <QHBoxLayout>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QKeyEvent>
 #include <QLabel>
-#include <QPixmap>
+#include <QMessageBox>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
-#include <QSettings>
-#include <QVBoxLayout>
+#include <QSignalBlocker>
 
 namespace {
-constexpr const char *kGeometryKey = "TileGroupsWindow/geometry";
-constexpr const char *kDefaultFolderLabel = "(Default)";
-constexpr int kFolderPathRole = Qt::UserRole + 1;   // absolute path
-constexpr int kJsonPathRole = Qt::UserRole + 1;     // absolute path
-}
+const char *kDefaultFolder = "(Default)";
+const char *kNoGroups = "No Tile Groups Found";
+} // namespace
 
-TileGroupsWindow::TileGroupsWindow(QWidget *parent)
-    : QWidget(parent, Qt::Tool)
+class TileGroupsPreview : public QWidget
+{
+public:
+    TileGroupsPreview(TileGroupsWindow *owner, QScrollArea *scroll)
+        : QWidget(scroll), m_owner(owner), m_scroll(scroll) {}
+    void refit()
+    {
+        const QSize view = m_scroll->viewport()->size();
+        resize(m_owner->m_previewImage.isNull() ? view : m_owner->m_previewImage.size().expandedTo(view));
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.fillRect(rect(), QColor(169, 169, 169));
+        if (!m_owner->m_previewImage.isNull()) {
+            p.drawImage(0, 0, m_owner->m_previewImage);
+            return;
+        }
+        QFont f(QStringLiteral("Arial"));
+        f.setPixelSize(12);
+        p.setFont(f);
+        p.setPen(QColor(105, 105, 105));
+        QString text;
+        if (m_owner->m_noGroupsAvailable) {
+            text = QObject::tr("No tile groups found.\n\nDrop .json files in:\n%1")
+                       .arg(m_owner->m_root.isEmpty() ? QObject::tr("(Tilegroups folder not configured)")
+                                                      : QDir::toNativeSeparators(m_owner->m_root));
+        } else if (m_owner->m_groupCombo->count() > 0
+                   && m_owner->m_groupCombo->currentText() != QLatin1String(kNoGroups)) {
+            text = QObject::tr("Select a tile group from the list above.");
+        }
+        if (!text.isEmpty())
+            p.drawText(QRect(10, 10, width() - 20, height() - 20), Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, text);
+    }
+
+private:
+    TileGroupsWindow *m_owner;
+    QScrollArea *m_scroll;
+};
+
+TileGroupsWindow::TileGroupsWindow(Editor *editor, QWidget *mainWindow)
+    : ToolPalette(QStringLiteral("TileGroups"), QStringLiteral("fTileGroups"), mainWindow)
+    , m_editor(editor)
 {
     setWindowTitle(tr("Tile Groups"));
+    setFixedSize(446, 382);
 
-    auto *root = new QHBoxLayout(this);
-    root->setContentsMargins(8, 8, 8, 8);
-    root->setSpacing(8);
+    auto label = [this](const QString &text, int x, int y, int w = 80, Qt::Alignment a = Qt::AlignLeft) {
+        auto *l = new QLabel(text, this);
+        l->setGeometry(x, y, w, 16);
+        l->setAlignment(a | Qt::AlignVCenter);
+        return l;
+    };
+    label(tr("Folder:"), 12, 9);
+    m_folderCombo = new QComboBox(this);
+    m_folderCombo->setGeometry(12, 25, 193, 21);
+    label(tr("Tile Group:"), 12, 49);
+    m_groupCombo = new QComboBox(this);
+    m_groupCombo->setGeometry(12, 65, 193, 21);
 
-    // -- Left column: folder/group combos + preview + path label
-    auto *left = new QVBoxLayout;
-    {
-        auto *folderLabel = new QLabel(tr("Folder:"));
-        m_folderCombo = new QComboBox;
-        m_folderCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-        left->addWidget(folderLabel);
-        left->addWidget(m_folderCombo);
+    m_scroll = new QScrollArea(this);
+    m_scroll->setGeometry(12, 92, 259, 243);
+    m_scroll->setFrameShape(QFrame::Box);
+    m_scroll->setWidgetResizable(false);
+    m_preview = new TileGroupsPreview(this, m_scroll);
+    m_scroll->setWidget(m_preview);
 
-        auto *groupLabel = new QLabel(tr("Tile Group:"));
-        m_groupCombo = new QComboBox;
-        m_groupCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-        left->addWidget(groupLabel);
-        left->addWidget(m_groupCombo);
+    m_pathLabel = new QLabel(this);
+    m_pathLabel->setGeometry(12, 339, 420, 32);
+    m_pathLabel->setStyleSheet(QStringLiteral("color: #696969;"));
+    m_pathLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
-        auto *scroll = new QScrollArea;
-        m_previewLabel = new QLabel;
-        m_previewLabel->setAlignment(Qt::AlignCenter);
-        m_previewLabel->setStyleSheet(
-            QStringLiteral("background-color: #404040;"));
-        m_previewLabel->setMinimumSize(220, 200);
-        scroll->setWidget(m_previewLabel);
-        scroll->setWidgetResizable(true);
-        left->addWidget(scroll, 1);
+    auto value = [this](int y) {
+        auto *l = new QLabel(this);
+        l->setGeometry(365, y, 76, 16);
+        l->setStyleSheet(QStringLiteral("color: #4040a0;"));
+        return l;
+    };
+    label(tr("Tile Groups:"), 280, 15, 80, Qt::AlignRight);
+    m_countValue = value(15);
+    label(tr("TileSet:"), 280, 45, 80, Qt::AlignRight);
+    m_tilesetValue = value(45);
+    label(tr("Name:"), 280, 75, 80, Qt::AlignRight);
+    m_nameValue = value(75);
+    label(tr("Width:"), 280, 105, 80, Qt::AlignRight);
+    m_widthValue = value(105);
+    label(tr("Height:"), 280, 135, 80, Qt::AlignRight);
+    m_heightValue = value(135);
+    label(tr("Notes:"), 280, 165, 80, Qt::AlignRight);
+    m_notesValue = value(165);
+    m_notesValue->setGeometry(365, 165, 76, 40);
+    m_notesValue->setWordWrap(true);
+    m_notesValue->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    m_notesValue->setText(tr("N/A"));
 
-        m_pathLabel = new QLabel;
-        m_pathLabel->setStyleSheet(QStringLiteral("color: gray;"));
-        m_pathLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        m_pathLabel->setWordWrap(true);
-        left->addWidget(m_pathLabel);
-    }
-    root->addLayout(left, 2);
+    auto *place = new QPushButton(tr("Place Tile Group"), this);
+    place->setGeometry(303, 210, 130, 23);
+    auto *hint = label(tr("Ctrl+B to Place"), 303, 236, 130, Qt::AlignHCenter);
+    hint->setStyleSheet(QStringLiteral("color: #696969;"));
 
-    // -- Right column: details + place button
-    auto *right = new QVBoxLayout;
-    {
-        auto *form = new QFormLayout;
-        form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        auto makeValue = []() {
-            auto *l = new QLabel;
-            l->setStyleSheet(QStringLiteral("color: #4040a0;"));
-            l->setTextInteractionFlags(Qt::TextSelectableByMouse);
-            return l;
-        };
-        m_countValue   = makeValue();
-        m_tilesetValue = makeValue();
-        m_nameValue    = makeValue();
-        m_widthValue   = makeValue();
-        m_heightValue  = makeValue();
-        m_notesValue   = makeValue();
-        m_notesValue->setWordWrap(true);
-        form->addRow(tr("Tile Groups:"), m_countValue);
-        form->addRow(tr("TileSet:"),     m_tilesetValue);
-        form->addRow(tr("Name:"),        m_nameValue);
-        form->addRow(tr("Width:"),       m_widthValue);
-        form->addRow(tr("Height:"),      m_heightValue);
-        form->addRow(tr("Notes:"),       m_notesValue);
-        right->addLayout(form);
+    connect(place, &QPushButton::clicked, this, [this] { m_editor->beginTileGroupPlacement(true); });
+    connect(m_folderCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { onFolderChanged(); });
+    connect(m_groupCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { onGroupChanged(); });
+    connect(m_editor->document(), &MapDocument::documentReplaced, this, [this] { renderPreview(); });
 
-        right->addStretch(1);
-
-        m_placeButton = new QPushButton(tr("Place Tile Group"));
-        m_placeButton->setEnabled(false);
-        right->addWidget(m_placeButton);
-
-        auto *shortcutLabel = new QLabel(tr("Ctrl+B to Place"));
-        shortcutLabel->setAlignment(Qt::AlignCenter);
-        shortcutLabel->setStyleSheet(QStringLiteral("color: gray;"));
-        right->addWidget(shortcutLabel);
-    }
-    root->addLayout(right, 1);
-
-    resize(580, 420);
-    restoreGeometry();
-
-    connect(m_folderCombo, qOverload<int>(&QComboBox::currentIndexChanged),
-            this, &TileGroupsWindow::onFolderChanged);
-    connect(m_groupCombo, qOverload<int>(&QComboBox::currentIndexChanged),
-            this, &TileGroupsWindow::onGroupChanged);
-    connect(m_placeButton, &QPushButton::clicked,
-            this, &TileGroupsWindow::onPlaceClicked);
-
-    refresh();
+    refreshFromDisk();
 }
 
-void TileGroupsWindow::refresh(const QString &selectFolder)
+void TileGroupsWindow::resetLabels()
 {
-    const QSignalBlocker bf(m_folderCombo);
-    const QSignalBlocker bg(m_groupCombo);
-
-    m_folderCombo->clear();
-    m_groupCombo->clear();
-    m_previewLabel->setPixmap(QPixmap());
-    m_previewLabel->setText(QString());
+    m_widthValue->clear();
+    m_heightValue->clear();
+    m_tilesetValue->clear();
+    m_nameValue->clear();
+    m_notesValue->clear();
     m_pathLabel->clear();
+}
 
-    const QString rootPath = Settings::tileGroupsPath();
-    QDir rootDir(rootPath);
-    if (!rootDir.exists()) {
-        m_pathLabel->setText(tr("Folder not found: %1\n"
-            "Use File → Settings to set the Tilegroups folder.")
-            .arg(rootPath));
-        m_countValue->setText(QStringLiteral("0"));
-        m_placeButton->setEnabled(false);
-        return;
-    }
-
-    // Categories: each subfolder + (Default) for loose root JSONs.
-    const QStringList subs = rootDir.entryList(
-        QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    int selectIdx = -1;
-    for (const QString &s : subs) {
-        m_folderCombo->addItem(s);
-        m_folderCombo->setItemData(m_folderCombo->count() - 1,
-                                   rootDir.filePath(s), kFolderPathRole);
-        if (!selectFolder.isEmpty()
-            && s.compare(selectFolder, Qt::CaseInsensitive) == 0) {
-            selectIdx = m_folderCombo->count() - 1;
+void TileGroupsWindow::refreshFromDisk(const QString &selectFolder)
+{
+    loadFolders();
+    if (!selectFolder.isEmpty()) {
+        for (int i = 0; i < m_folderCombo->count(); ++i) {
+            if (m_folderCombo->itemText(i).compare(selectFolder, Qt::CaseInsensitive) == 0) {
+                if (m_folderCombo->currentIndex() == i)
+                    onFolderChanged();
+                else
+                    m_folderCombo->setCurrentIndex(i);
+                break;
+            }
         }
     }
-    const QStringList rootJsons = rootDir.entryList(
-        QStringList{ QStringLiteral("*.json") }, QDir::Files);
-    if (!rootJsons.isEmpty()) {
-        m_folderCombo->addItem(tr(kDefaultFolderLabel));
-        m_folderCombo->setItemData(m_folderCombo->count() - 1,
-                                   rootPath, kFolderPathRole);
-    }
+}
 
-    if (m_folderCombo->count() == 0) {
-        m_pathLabel->setText(
-            tr("No tile groups in %1.\n"
-               "Use the Tile Selection window to save your first group.")
-                .arg(rootPath));
-        m_countValue->setText(QStringLiteral("0"));
-        m_placeButton->setEnabled(false);
+void TileGroupsWindow::loadFolders()
+{
+    m_root = Settings::tileGroupsPath();
+    resetLabels();
+    {
+        const QSignalBlocker b1(m_folderCombo);
+        const QSignalBlocker b2(m_groupCombo);
+        m_folderCombo->clear();
+        m_groupCombo->clear();
+    }
+    m_previewImage = QImage();
+    const QDir root(m_root);
+    if (m_root.trimmed().isEmpty() || !root.exists()) {
+        m_noGroupsAvailable = true;
+        m_preview->refit();
         return;
     }
-
-    m_folderCombo->setCurrentIndex(selectIdx >= 0 ? selectIdx : 0);
-    populateGroupsForCurrentFolder();
-    updateDetailsAndPreview();
-}
-
-QString TileGroupsWindow::folderPath(int folderRow) const
-{
-    if (folderRow < 0 || folderRow >= m_folderCombo->count())
-        return QString();
-    return m_folderCombo->itemData(folderRow, kFolderPathRole).toString();
-}
-
-QString TileGroupsWindow::currentJsonPath() const
-{
-    const int row = m_groupCombo->currentIndex();
-    if (row < 0)
-        return QString();
-    return m_groupCombo->itemData(row, kJsonPathRole).toString();
-}
-
-void TileGroupsWindow::populateGroupsForCurrentFolder()
-{
-    const QSignalBlocker bg(m_groupCombo);
-    m_groupCombo->clear();
-
-    const QString fp = folderPath(m_folderCombo->currentIndex());
-    if (fp.isEmpty())
-        return;
-
-    QDir d(fp);
-    const QStringList jsons = d.entryList(QStringList{ QStringLiteral("*.json") },
-                                          QDir::Files, QDir::Name);
-    for (const QString &fn : jsons) {
-        m_groupCombo->addItem(QFileInfo(fn).completeBaseName());
-        m_groupCombo->setItemData(m_groupCombo->count() - 1,
-                                  d.filePath(fn), kJsonPathRole);
+    QStringList entries;
+    if (!root.entryList({ QStringLiteral("*.json") }, QDir::Files).isEmpty())
+        entries << tr(kDefaultFolder);
+    entries << root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    m_noGroupsAvailable = entries.isEmpty();
+    {
+        const QSignalBlocker b(m_folderCombo);
+        m_folderCombo->addItems(entries);
     }
-    m_countValue->setText(QString::number(m_groupCombo->count()));
-    if (m_groupCombo->count() > 0)
-        m_groupCombo->setCurrentIndex(0);
+    if (!entries.isEmpty()) {
+        m_folderCombo->setCurrentIndex(0);
+        onFolderChanged();
+    }
+    m_preview->refit();
 }
 
-void TileGroupsWindow::onFolderChanged(int)
+void TileGroupsWindow::onFolderChanged()
 {
-    populateGroupsForCurrentFolder();
-    updateDetailsAndPreview();
+    resetLabels();
+    {
+        const QSignalBlocker b(m_groupCombo);
+        m_groupCombo->clear();
+    }
+    if (m_folderCombo->currentIndex() < 0)
+        return;
+    const QString folder = m_folderCombo->currentText();
+    const QString path = folder == tr(kDefaultFolder) ? m_root : QDir(m_root).filePath(folder);
+    const QDir d(path);
+    QStringList names;
+    if (d.exists()) {
+        for (const QString &fn : d.entryList({ QStringLiteral("*.json") }, QDir::Files, QDir::Name))
+            names << QFileInfo(fn).completeBaseName();
+        m_countValue->setText(QString::number(names.size()));
+    }
+    {
+        const QSignalBlocker b(m_groupCombo);
+        if (names.isEmpty())
+            m_groupCombo->addItem(tr(kNoGroups));
+        else
+            m_groupCombo->addItems(names);
+    }
+    m_groupCombo->setCurrentIndex(0);
+    onGroupChanged();
 }
 
-void TileGroupsWindow::onGroupChanged(int)
+void TileGroupsWindow::onGroupChanged()
 {
-    updateDetailsAndPreview();
-}
-
-void TileGroupsWindow::updateDetailsAndPreview()
-{
-    const QString jsonPath = currentJsonPath();
-    if (jsonPath.isEmpty()) {
-        m_previewLabel->setPixmap(QPixmap());
-        m_previewLabel->setText(tr("(no group)"));
+    const QString file = m_groupCombo->currentText();
+    if (m_groupCombo->currentIndex() < 0 || file == tr(kNoGroups)) {
+        m_previewImage = QImage();
         m_pathLabel->clear();
-        m_tilesetValue->clear();
-        m_nameValue->clear();
+        m_preview->refit();
+        return;
+    }
+    const QString folder = m_folderCombo->currentText();
+    const QString dir = folder == tr(kDefaultFolder) ? m_root : QDir(m_root).filePath(folder);
+    const QString path = QDir(dir).filePath(file + QStringLiteral(".json"));
+    m_pathLabel->setText(QDir::toNativeSeparators(path));
+    m_pathLabel->setToolTip(QDir::toNativeSeparators(path));
+
+    TileGroupData data;
+    TileGroupIO::Header header;
+    QString err;
+    if (!TileGroupIO::load(path, data, header, err)) {
+        m_editor->clearTileGroup();
+        m_previewImage = QImage();
         m_widthValue->clear();
         m_heightValue->clear();
-        m_notesValue->clear();
-        m_placeButton->setEnabled(false);
+        m_tilesetValue->clear();
+        m_nameValue->clear();
+        m_notesValue->setText(tr("N/A"));
+        m_preview->refit();
+        QMessageBox::warning(this, tr("Invalid Tile Group"),
+            tr("The tile group file could not be read:\n%1\n\nThe file may be malformed or hand-edited incorrectly.")
+                .arg(QDir::toNativeSeparators(path)));
         return;
     }
+    data.fileName = file;
+    m_editor->setTileGroup(data);
+    const QString na = tr("N/A");
+    m_widthValue->setText(QString::number(data.width));
+    m_heightValue->setText(QString::number(data.height));
+    m_tilesetValue->setText(header.tileset.isEmpty() ? na : header.tileset);
+    m_nameValue->setText(header.name.isEmpty() ? na : header.name);
+    m_notesValue->setText(header.notes.isEmpty() ? na : header.notes);
+    renderPreview();
+}
 
-    // Show preview from accompanying .bmp.
-    const QFileInfo info(jsonPath);
-    const QString bmpPath = info.dir()
-        .filePath(info.completeBaseName() + QStringLiteral(".bmp"));
-    QPixmap pm(bmpPath);
-    if (pm.isNull())
-        m_previewLabel->setText(tr("(no preview)"));
-    else
-        m_previewLabel->setPixmap(pm);
-
-    m_pathLabel->setText(jsonPath);
-
-    // Parse header for details.
-    QFile f(jsonPath);
-    QJsonObject header;
-    if (f.open(QIODevice::ReadOnly)) {
-        const QByteArray bytes = f.readAll();
-        f.close();
-        const QJsonDocument doc = QJsonDocument::fromJson(bytes);
-        if (doc.isObject())
-            header = doc.object().value(QStringLiteral("header")).toObject();
+void TileGroupsWindow::renderPreview()
+{
+    m_previewImage = QImage();
+    const TileGroupData &g = m_editor->tileGroup();
+    const MapDocument *doc = m_editor->document();
+    if (g.isLoaded() && doc && doc->isLoaded()) {
+        constexpr int T = TileImageCache::TileSize;
+        QImage img(g.width * T, g.height * T, QImage::Format_ARGB32);
+        if (!img.isNull()) {
+            img.fill(QColor(211, 211, 211));
+            QPainter p(&img);
+            for (int y = 0; y < g.height; ++y) {
+                for (int x = 0; x < g.width; ++x) {
+                    const QImage tile = MapRenderer::mappingImage(*doc, g.mappings[static_cast<std::size_t>(y * g.width + x)]);
+                    if (!tile.isNull())
+                        p.drawImage(x * T, y * T, tile);
+                }
+            }
+            p.end();
+            m_previewImage = img;
+        }
     }
-    m_tilesetValue->setText(header.value(QStringLiteral("tileset")).toString());
-    m_nameValue->setText(header.value(QStringLiteral("name")).toString());
-    m_widthValue->setText(QString::number(header.value(QStringLiteral("width")).toInt()));
-    m_heightValue->setText(QString::number(header.value(QStringLiteral("height")).toInt()));
-    m_notesValue->setText(header.value(QStringLiteral("notes")).toString());
-
-    m_placeButton->setEnabled(true);
+    m_preview->refit();
 }
 
-void TileGroupsWindow::onPlaceClicked()
+void TileGroupsWindow::showEvent(QShowEvent *event)
 {
-    const QString p = currentJsonPath();
-    if (!p.isEmpty())
-        emit placeRequested(p);
-}
-
-void TileGroupsWindow::keyPressEvent(QKeyEvent *event)
-{
-    // Ctrl+B → place current group, matching VB shortcut.
-    if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_B) {
-        if (m_placeButton->isEnabled())
-            onPlaceClicked();
-        event->accept();
-        return;
-    }
-    QWidget::keyPressEvent(event);
-}
-
-void TileGroupsWindow::closeEvent(QCloseEvent *event)
-{
-    saveGeometry();
-    QWidget::closeEvent(event);
-}
-
-void TileGroupsWindow::saveGeometry()
-{
-    QSettings s;
-    s.setValue(QLatin1String(kGeometryKey), QWidget::saveGeometry());
-}
-
-void TileGroupsWindow::restoreGeometry()
-{
-    QSettings s;
-    const QByteArray g = s.value(QLatin1String(kGeometryKey)).toByteArray();
-    if (!g.isEmpty())
-        QWidget::restoreGeometry(g);
+    ToolPalette::showEvent(event);
+    m_preview->refit();
 }

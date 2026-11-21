@@ -3,10 +3,11 @@
 #include <QString>
 #include <QVector>
 
-// Manages the bundled blank .map templates. Files are embedded as Qt
-// resources under :/blankmaps/blank_WxH.map and extracted on first use
-// to AppLocalDataLocation/BlankMaps/, since OP2Utility::Map::ReadMap
-// needs a real filesystem path.
+// Bundled blank .map templates (OP2Mapper3 GlobalVariables blank-map
+// extraction). Embedded as :/blankmaps/blank_WxH.map and extracted to
+// <exe>/BlankMaps (if it already has templates or the exe folder is
+// writable) or else %LOCALAPPDATA%/OP2Mapper/BlankMaps. A file that is
+// missing or has the wrong size is (re)written via a temp file.
 namespace BlankMaps {
 
 struct Size {
@@ -14,12 +15,13 @@ struct Size {
     int height;
 };
 
-// All available blank-map sizes in the order the New Map dialog should show.
 QVector<Size> availableSizes();
+QString folder();
 
-// Path on disk for blank_WxH.map. Extracts the embedded resource on first
-// call. Returns empty string if width/height aren't in availableSizes() or
-// the extraction fails.
+// Extracts every template. Returns false and an error message on failure.
+bool ensureExtracted(QString &error);
+
+// Path of blank_WxH.map on disk, or empty if that size doesn't exist.
 QString pathFor(int width, int height);
 
 } // namespace BlankMaps

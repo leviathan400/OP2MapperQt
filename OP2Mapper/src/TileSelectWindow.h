@@ -1,47 +1,54 @@
 #pragma once
 
-#include <QWidget>
+#include "ToolPalette.h"
 
-class MapDocument;
-class TileClipboard;
-class QLabel;
-class QPushButton;
+#include <QImage>
+#include <QPoint>
 
-// Tool palette mirroring VB fTileSelect.vb — shows a preview of the current
-// clipboard contents and a button to export the region as a tile group
-// (BMP + JSON pair) into the configured Tilegroups\Exported\ folder.
-class TileSelectWindow : public QWidget
+class Editor;
+class QScrollArea;
+class TileSelectCanvas;
+
+// "Tile Selection" palette (OP2Mapper3 fTileSelect, tool 3): shows the
+// copied region. Everything is in menus: the title-bar menu (Large Window,
+// Zoom 100/75/50/25, Zoom to Fit Window, Show Cell Types) and a right-click
+// menu (Export Tile Group, Show Cell Types). Ctrl+wheel steps the zoom;
+// right-drag pans.
+class TileSelectWindow : public ToolPalette
 {
     Q_OBJECT
 public:
-    explicit TileSelectWindow(QWidget *parent = nullptr);
+    TileSelectWindow(Editor *editor, QWidget *mainWindow);
 
-    // Both pointers must outlive this window or be cleared before destruction.
-    void setClipboard(const TileClipboard *clip);
-    void setDocument(MapDocument *doc);
-
-public slots:
-    // Call after the clipboard's contents change so the preview repaints.
-    void refresh();
+    void refreshPreview();
 
 signals:
-    // Fired after a successful tile-group export so the TileGroupsWindow can
-    // refresh and highlight the Exported folder.
-    void tileGroupSaved(const QString &name);
+    void tileGroupExported(); // refresh Tile Groups on "Exported"
 
 protected:
-    void closeEvent(QCloseEvent *event) override;
-
-private slots:
-    void onSaveClicked();
+    void addMenuExtras(QMenu *menu) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
-    void saveGeometry();
-    void restoreGeometry();
+    friend class TileSelectCanvas;
+    void applyWindowSize();
+    void setLargeWindow(bool on);
+    void setZoom(double zoom, bool fit);
+    void setShowCellTypes(bool on);
+    void stepZoom(int delta);
+    int previewTileSize(int w, int h) const;
+    void pickZoomForNewCopy(int w, int h);
+    void exportTileGroup();
+    void showContextMenu(const QPoint &globalPos);
 
-    const TileClipboard *m_clipboard = nullptr;
-    MapDocument *m_doc = nullptr;
-    QPushButton *m_saveButton = nullptr;
-    QLabel *m_previewLabel = nullptr;
-    QLabel *m_statusLabel = nullptr;
+    Editor *m_editor;
+    QScrollArea *m_scroll = nullptr;
+    TileSelectCanvas *m_canvas = nullptr;
+    QImage m_preview;
+    bool m_large = false;
+    double m_zoom = 1.0;
+    bool m_fit = false;
+    bool m_showCellTypes = false;
+    quint64 m_autoZoomedGeneration = 0;
 };

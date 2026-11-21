@@ -1,47 +1,44 @@
 #pragma once
 
+#include <QPoint>
 #include <QWidget>
 
-// Scrollable picker showing every tile of one tileset as a fixed 6-column
-// grid of 32×32 thumbnails (the column count matches OP2Mapper3's fTileSet
-// layout, so the two editors feel the same). The widget paints directly
-// from the TileImageCache strip — tileset images are stored as a single
-// 32px-wide column of tiles, so a thumbnail at imageIdx is just the slice
-// at y = imageIdx * 32. Left-click selects (red outline), right-click asks
-// the owner to clear the active selection.
+class QScrollArea;
+
+// The tile grid of the Tile Set palette (OP2Mapper3 fTileSet): 6 columns,
+// 33 px stride, grey tile borders, red 2 px box on the selected tile.
+// Left-click picks a tile (clicks right of the 6th column are ignored);
+// right-drag pans the scroll area.
 class TilesetGrid : public QWidget
 {
     Q_OBJECT
 public:
     static constexpr int TileSize = 32;
-    static constexpr int TilePadding = 1;
-    static constexpr int TilesPerRow = 6;
+    static constexpr int Stride = 33;
+    static constexpr int Columns = 6;
 
-    explicit TilesetGrid(QWidget *parent = nullptr);
+    TilesetGrid(QScrollArea *scroll, QWidget *parent = nullptr);
 
-    // image is owned by the TileImageCache. Pass nullptr to clear.
     void setTilesetImage(const QImage *image);
-
-    int selectedTile() const { return m_selectedTile; }
-    void setSelectedTile(int imageIdx);
+    int selectedTile() const { return m_selected; }
+    void setSelectedTile(int index);
 
 signals:
-    // Left-click on a thumbnail; imageIdx is the tile's index within the
-    // currently displayed tileset (not a map tileMappingIndex).
-    void tileClicked(int imageIdx);
-    // Right-click anywhere in the grid — owner should drop the paint tool.
-    void clearSelectionRequested();
+    void tileClicked(int index);
 
 protected:
-    QSize sizeHint() const override;
-    QSize minimumSizeHint() const override;
     void paintEvent(QPaintEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
     int tileCount() const;
-    void updateGeometryForImage();
+    void updateSize();
 
+    QScrollArea *m_scroll;
     const QImage *m_image = nullptr;
-    int m_selectedTile = -1;
+    int m_selected = -1;
+    bool m_panning = false;
+    QPoint m_panStart;
 };

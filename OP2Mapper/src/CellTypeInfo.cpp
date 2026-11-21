@@ -1,101 +1,136 @@
 #include "CellTypeInfo.h"
 
-#include <OP2Utility.h>
+namespace {
+
+struct Style {
+    const char *name;
+    const char *label;
+    QRgb labelColor;
+    QRgb basic;
+    QRgb detailed;
+    QRgb overlay;
+};
+
+// Indexed by raw cell type value.
+const Style kStyles[CellTypeInfo::Count] = {
+    { "FastPassible1",     "Fast1",  0xFF7CFC00, 0xFF90EE90, 0xFF00FF00, 0xFF00FF00 },
+    { "Impassible2",       "Imp2",   0xFFFF0000, 0xFF8B0000, 0xFFFF0000, 0xFFC00000 },
+    { "SlowPassible1",     "Slow1",  0xFFFFA500, 0xFFFFFF00, 0xFFFF8000, 0xFFFF8000 },
+    { "SlowPassible2",     "Slow2",  0xFFFFA500, 0xFFFFFF00, 0xFFFF8000, 0xFFFF8000 },
+    { "MediumPassible1",   "Med1",   0xFFFFFF00, 0xFF808000, 0xFFFFFF00, 0xFFFFFF00 },
+    { "MediumPassible2",   "Med2",   0xFFFFFF00, 0xFF808000, 0xFFFFFF00, 0xFFFFFF00 },
+    { "Impassible1",       "Imp1",   0xFFFF0000, 0xFF8B0000, 0xFFFF0000, 0xFFC00000 },
+    { "FastPassible2",     "Fast2",  0xFF7CFC00, 0xFF90EE90, 0xFF00FF00, 0xFF00FF00 },
+    { "NorthCliffs",       "N Clif", 0xFFFF0000, 0xFFA0522D, 0xFF8B4513, 0xFFC00000 },
+    { "CliffsHighSide",    "Clif H", 0xFFFF0000, 0xFFA0522D, 0xFF8B4513, 0xFFC00000 },
+    { "CliffsLowSide",     "Clif L", 0xFFFF0000, 0xFFA0522D, 0xFF8B4513, 0xFFC00000 },
+    { "VentsAndFumaroles", "Vent",   0xFFFFFFFF, 0xFFFFA500, 0xFF800080, 0xFFFF8000 },
+    { "zPad12",            "zPad1",  0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+    { "zPad13",            "zPad1",  0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+    { "zPad14",            "zPad1",  0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+    { "zPad15",            "zPad1",  0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+    { "zPad16",            "zPad1",  0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+    { "zPad17",            "zPad1",  0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+    { "zPad18",            "zPad1",  0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+    { "zPad19",            "zPad1",  0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+    { "zPad20",            "zPad1",  0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+    { "DozedArea",         "Dozed",  0xFF90EE90, 0xFFD3D3D3, 0xFFC0C0C0, 0xFF00FF00 },
+    { "Rubble",            "Rubble", 0xFFFF0000, 0xFFA9A9A9, 0xFF404040, 0xFFC00000 },
+    { "NormalWall",        "Wall",   0xFFFF0000, 0xFF808080, 0xFF808080, 0xFFC00000 },
+    { "MicrobeWall",       "MWall",  0xFFFF0000, 0xFF800080, 0xFF8000FF, 0xFFC00000 },
+    { "LavaWall",          "LWall",  0xFFFF0000, 0xFFFF4500, 0xFFFF4500, 0xFFC00000 },
+    { "Tube0",             "Tube0",  0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF },
+    { "Tube1",             "Tube1",  0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF },
+    { "Tube2",             "Tube2",  0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF },
+    { "Tube3",             "Tube3",  0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF },
+    { "Tube4",             "Tube4",  0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF },
+    { "Tube5",             "Tube5",  0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF, 0xFF00FFFF },
+};
+
+struct Row {
+    const char *text;
+    int cellType;
+};
+
+const Row kRows[CellTypeInfo::Count] = {
+    { "Fast Passable 1 (F1)", 0 },     { "Fast Passable 2 (F2)", 7 },
+    { "Medium Passable 1 (M1)", 4 },   { "Medium Passable 2 (M2)", 5 },
+    { "Slow Passable 1 (S1)", 2 },     { "Slow Passable 2 (S2)", 3 },
+    { "Impassable 1 (I1)", 6 },        { "Impassable 2 (I2)", 1 },
+    { "North Cliffs (NC)", 8 },        { "Cliffs - High Side (CHS)", 9 },
+    { "Cliffs - Low Side (CLS)", 10 }, { "Vents and Fumaroles (V)", 11 },
+    { "zPad12 (Z12)", 12 },            { "zPad13 (Z13)", 13 },
+    { "zPad14 (Z14)", 14 },            { "zPad15 (Z15)", 15 },
+    { "zPad16 (Z16)", 16 },            { "zPad17 (Z17)", 17 },
+    { "zPad18 (Z18)", 18 },            { "zPad19 (Z19)", 19 },
+    { "zPad20 (Z20)", 20 },            { "Bulldozed (D)", 21 },
+    { "Rubble (R)", 22 },              { "Normal Wall (NW)", 23 },
+    { "Microbe Wall (MW)", 24 },       { "Lava Wall (LW)", 25 },
+    { "Tube 0 (T0)", 26 },             { "Tube 1 (T1)", 27 },
+    { "Tube 2 (T2)", 28 },             { "Tube 3 (T3)", 29 },
+    { "Tube 4 (T4)", 30 },             { "Tube 5 (T5)", 31 },
+};
+
+const Style &style(int ct)
+{
+    return kStyles[(ct >= 0 && ct < CellTypeInfo::Count) ? ct : 12];
+}
+
+} // namespace
 
 namespace CellTypeInfo {
 
-QString label(OP2Utility::CellType ct)
+QString enumName(int ct)
 {
-    using OP2Utility::CellType;
+    if (ct < 0 || ct >= Count)
+        return QString::number(ct);
+    return QString::fromLatin1(kStyles[ct].name);
+}
+
+QString label(int ct) { return QString::fromLatin1(style(ct).label); }
+QColor labelColor(int ct) { return QColor::fromRgba(style(ct).labelColor); }
+QColor basicColor(int ct) { return QColor::fromRgba(style(ct).basic); }
+QColor detailedColor(int ct) { return QColor::fromRgba(style(ct).detailed); }
+QColor overlayColor(int ct) { return QColor::fromRgba(style(ct).overlay); }
+
+QColor categoryColor(int ct)
+{
     switch (ct) {
-        case CellType::FastPassible1:    return "Fast1";
-        case CellType::FastPassible2:    return "Fast2";
-        case CellType::MediumPassible1:  return "Med1";
-        case CellType::MediumPassible2:  return "Med2";
-        case CellType::SlowPassible1:    return "Slow1";
-        case CellType::SlowPassible2:    return "Slow2";
-        case CellType::Impassible1:      return "Imp1";
-        case CellType::Impassible2:      return "Imp2";
-        case CellType::NorthCliffs:      return "NCliff";
-        case CellType::CliffsHighSide:   return "CliffH";
-        case CellType::CliffsLowSide:    return "CliffL";
-        case CellType::VentsAndFumaroles:return "Vent";
-        case CellType::DozedArea:        return "Dozed";
-        case CellType::Rubble:           return "Rubble";
-        case CellType::NormalWall:       return "Wall";
-        case CellType::MicrobeWall:      return "MWall";
-        case CellType::LavaWall:         return "LWall";
-        case CellType::Tube0:            return "Tube";
-        case CellType::Tube1:            return "Tube1";
-        case CellType::Tube2:            return "Tube2";
-        case CellType::Tube3:            return "Tube3";
-        case CellType::Tube4:            return "Tube4";
-        case CellType::Tube5:            return "Tube5";
-        default:                         return QString("?%1").arg(static_cast<int>(ct));
+    case 0: case 7: return QColor(0, 128, 0);              // Fast*: Green
+    case 4: case 5: return QColor(128, 128, 0);            // Medium*: Olive
+    case 2: case 3: return QColor(255, 140, 0);            // Slow*: DarkOrange
+    case 1: case 6: return QColor(255, 0, 0);              // Impassible*: Red
+    case 21: case 22: return QColor(139, 69, 19);          // Dozed/Rubble: SaddleBrown
+    case 23: case 24: case 25: return QColor(0, 0, 139);   // walls: DarkBlue
+    case 26: case 27: case 28: case 29: case 30: case 31:
+        return QColor(128, 0, 128);                        // tubes: Purple
+    case 8: case 9: case 10: return QColor(165, 42, 42);   // cliffs: Brown
+    case 11: return QColor(178, 34, 34);                   // vents: Firebrick
+    default: return QColor(169, 169, 169);                 // zPad: DarkGray
     }
 }
 
-QColor color(OP2Utility::CellType ct)
+QString listText(int row)
 {
-    using OP2Utility::CellType;
-    constexpr int A = 140; // overlay alpha
-    switch (ct) {
-        case CellType::FastPassible1:    return QColor(  0, 200,   0, A); // green
-        case CellType::FastPassible2:    return QColor( 80, 230,  80, A);
-        case CellType::MediumPassible1:  return QColor(255, 200,   0, A); // amber
-        case CellType::MediumPassible2:  return QColor(255, 160,   0, A);
-        case CellType::SlowPassible1:    return QColor(220, 100,   0, A); // orange
-        case CellType::SlowPassible2:    return QColor(200,  70,   0, A);
-        case CellType::Impassible1:      return QColor(220,   0,   0, A); // red
-        case CellType::Impassible2:      return QColor(160,   0,   0, A);
-        case CellType::NorthCliffs:      return QColor(120, 120, 120, A);
-        case CellType::CliffsHighSide:   return QColor(140, 140, 140, A);
-        case CellType::CliffsLowSide:    return QColor(100, 100, 100, A);
-        case CellType::VentsAndFumaroles:return QColor(255,   0, 255, A);
-        case CellType::DozedArea:        return QColor(160, 130,  90, A);
-        case CellType::Rubble:           return QColor(110,  80,  50, A);
-        case CellType::NormalWall:       return QColor(  0, 120, 200, A);
-        case CellType::MicrobeWall:      return QColor(  0, 180,  80, A);
-        case CellType::LavaWall:         return QColor(200,  60,   0, A);
-        case CellType::Tube0:
-        case CellType::Tube1:
-        case CellType::Tube2:
-        case CellType::Tube3:
-        case CellType::Tube4:
-        case CellType::Tube5:            return QColor(  0, 200, 220, A); // cyan
-        default:                         return QColor(255,   0, 255, A);
-    }
+    if (row < 0 || row >= Count)
+        return QString();
+    return QString::fromLatin1(kRows[row].text);
 }
 
-QString name(OP2Utility::CellType ct)
+int listRowToCellType(int row)
 {
-    using OP2Utility::CellType;
-    switch (ct) {
-        case CellType::FastPassible1:    return "Fast Passible 1";
-        case CellType::FastPassible2:    return "Fast Passible 2";
-        case CellType::MediumPassible1:  return "Medium Passible 1";
-        case CellType::MediumPassible2:  return "Medium Passible 2";
-        case CellType::SlowPassible1:    return "Slow Passible 1";
-        case CellType::SlowPassible2:    return "Slow Passible 2";
-        case CellType::Impassible1:      return "Impassible 1";
-        case CellType::Impassible2:      return "Impassible 2";
-        case CellType::NorthCliffs:      return "North Cliffs";
-        case CellType::CliffsHighSide:   return "Cliffs (High Side)";
-        case CellType::CliffsLowSide:    return "Cliffs (Low Side)";
-        case CellType::VentsAndFumaroles:return "Vents / Fumaroles";
-        case CellType::DozedArea:        return "Dozed Area";
-        case CellType::Rubble:           return "Rubble";
-        case CellType::NormalWall:       return "Normal Wall";
-        case CellType::MicrobeWall:      return "Microbe Wall";
-        case CellType::LavaWall:         return "Lava Wall";
-        case CellType::Tube0:            return "Tube";
-        case CellType::Tube1:            return "Tube 1";
-        case CellType::Tube2:            return "Tube 2";
-        case CellType::Tube3:            return "Tube 3";
-        case CellType::Tube4:            return "Tube 4";
-        case CellType::Tube5:            return "Tube 5";
-        default:                         return QString("Unknown (%1)").arg(static_cast<int>(ct));
-    }
+    if (row < 0 || row >= Count)
+        return -1;
+    return kRows[row].cellType;
 }
 
+int cellTypeToListRow(int ct)
+{
+    for (int i = 0; i < Count; ++i) {
+        if (kRows[i].cellType == ct)
+            return i;
+    }
+    return -1;
 }
+
+} // namespace CellTypeInfo

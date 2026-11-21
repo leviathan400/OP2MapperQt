@@ -1,35 +1,23 @@
 #pragma once
 
-#include <QWidget>
+#include "ToolPalette.h"
 
+class Editor;
 class QListWidget;
-class QListWidgetItem;
 
-class CellTypesWindow : public QWidget
+// "Cell Types" palette (OP2Mapper3 fCellTypes, tool 2): a plain list of the
+// 32 cell types. Opens with nothing selected (nothing armed); clicking a
+// row, including the already-selected one, arms the cell-type tool.
+class CellTypesWindow : public ToolPalette
 {
     Q_OBJECT
 public:
-    explicit CellTypesWindow(QWidget *parent = nullptr);
-
-public slots:
-    // Visually deselect any active row (without emitting cellTypeSelected).
-    // Called when another tool palette (e.g. TilesetWindow) takes focus.
+    CellTypesWindow(Editor *editor, QWidget *mainWindow);
     void clearSelection();
 
-signals:
-    // cellTypeValue is the OP2Utility::CellType enum value cast to int.
-    void cellTypeSelected(int cellTypeValue);
-
-protected:
-    void closeEvent(QCloseEvent *event) override;
-
-private slots:
-    void onItemActivated(QListWidgetItem *item);
-
 private:
-    void populate();
-    void saveGeometry();
-    void restoreGeometry();
+    void apply(int row);
 
+    Editor *m_editor;
     QListWidget *m_list = nullptr;
 };

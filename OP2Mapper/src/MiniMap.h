@@ -1,40 +1,43 @@
 #pragma once
 
+#include "ToolPalette.h"
+
 #include <QImage>
-#include <QWidget>
+#include <QRectF>
+#include <QTimer>
 
-class MapDocument;
+class Editor;
 
-// Standalone top-level window showing a thumbnail of the whole map with the
-// main view's current viewport drawn as a yellow rectangle. Clicking inside
-// the thumbnail emits centerRequested with scene coordinates.
-class MiniMap : public QWidget
+// "Mini Map" palette (OP2Mapper3 fMiniMap, tool 5): a GameMap render of
+// the whole map letterboxed in a fixed 433x355 client area, with the main
+// view's visible area as a yellow box. Click or drag to jump.
+class MiniMap : public ToolPalette
 {
     Q_OBJECT
 public:
-    explicit MiniMap(QWidget *parent = nullptr);
+    MiniMap(Editor *editor, QWidget *mainWindow);
 
-    void setDocument(const MapDocument *doc);
-
-    // Update the highlighted viewport rectangle (scene coords).
-    void setViewportRect(const QRectF &sceneRect);
+    void refreshThumbnail();
+    void scheduleRefresh(); // 300 ms debounce
+    void clearThumbnail();
+    void setViewportTiles(const QRectF &visibleTiles);
 
 signals:
-    // User clicked inside the thumbnail; payload is the corresponding scene
-    // point (centered on the click).
-    void centerRequested(QPointF scenePos);
+    void jumpToTile(int tx, int ty);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
-    void rebuildThumbnail();
-    QPointF widgetToScene(QPoint widgetPt) const;
+    void jumpTo(const QPoint &pos);
 
-    const MapDocument *m_doc = nullptr;
-    QImage m_thumb;          // one pixel per map tile
-    int m_pxPerTile = 2;     // display scale factor
-    QRectF m_viewportScene;  // last known visible scene rect
+    Editor *m_editor;
+    QImage m_thumb;
+    QRect m_thumbBounds;
+    QRectF m_visible;
+    bool m_dragging = false;
+    QTimer m_refreshTimer;
 };

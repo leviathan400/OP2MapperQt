@@ -1,535 +1,505 @@
 #include "MapView.h"
 
+#include "Editor.h"
 #include "MapDocument.h"
-#include "MapScene.h"
-#include "TileClipboard.h"
+#include "MapRenderer.h"
 #include "TileImageCache.h"
 
-#include <OP2Utility.h>
-
-#include <QGraphicsPixmapItem>
-#include <QGraphicsRectItem>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QFont>
+#include <QFontMetrics>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QPen>
-#include <QPixmap>
-#include <QResizeEvent>
-#include <QUndoStack>
+#include <QPainterPath>
+#include <QUrl>
 #include <QWheelEvent>
 
-MapView::MapView(QWidget *parent)
-    : QGraphicsView(parent)
+#include <algorithm>
+#include <cmath>
+
+namespace {
+constexpr int T = TileImageCache::TileSize;
+constexpr int kPanMargin = 64;
+constexpr double kZoomSteps[] = { 0.10, 0.25, 0.50, 0.75, 1.00, 1.25, 1.50 };
+constexpr qint64 kMaxCachePixels = 4096LL * 4096LL;
+} // namespace
+
+MapView::MapView(Editor *editor, QWidget *parent)
+    : QWidget(parent), m_editor(editor), m_doc(editor->document())
 {
-    m_scene = new MapScene(this);
-    setScene(m_scene);
-    setDragMode(QGraphicsView::ScrollHandDrag);
-    setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-    setRenderHint(QPainter::SmoothPixmapTransform, false);
     setMouseTracking(true);
-    viewport()->setMouseTracking(true);
+    setAcceptDrops(true);
+    setFocusPolicy(Qt::StrongFocus);
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    setMinimumSize(200, 150);
 
-    // Dashed yellow selection overlay. Lives on the scene; hidden until the
-    // user makes a selection.
-    QPen selPen(QColor(255, 230, 0));
-    selPen.setWidth(0); // cosmetic — 1px at any zoom
-    selPen.setStyle(Qt::DashLine);
-    selPen.setCosmetic(true);
-    m_selectionItem = new QGraphicsRectItem;
-    m_selectionItem->setPen(selPen);
-    m_selectionItem->setBrush(Qt::NoBrush);
-    m_selectionItem->setZValue(100);
-    m_selectionItem->setVisible(false);
-    m_scene->addItem(m_selectionItem);
-
-    m_pastePreview = new QGraphicsPixmapItem;
-    m_pastePreview->setOpacity(0.5);
-    m_pastePreview->setZValue(99);
-    m_pastePreview->setVisible(false);
-    m_scene->addItem(m_pastePreview);
+    connect(m_doc, &MapDocument::regionChanged, this, &MapView::onRegionChanged);
+    connect(m_editor, &Editor::overlayChanged, this, qOverload<>(&QWidget::update));
+    connect(m_editor, &Editor::overlaysChanged, this, qOverload<>(&QWidget::update));
+    connect(m_editor, &Editor::renderModeChanged, this, [this] {
+        m_cacheMode = -1;
+        rebuildCache();
+        update();
+    });
+    connect(m_editor, &Editor::cursorChanged, this, &MapView::updateCursor);
 }
 
-void MapView::setDocument(MapDocument *doc)
+int MapView::tilePx() const
 {
-    // If a paint stroke is still open (document swapped while the mouse
-    // button is held — e.g. a keyboard shortcut fired mid-drag), close its
-    // macro on the OLD document before switching. An endMacro() landing on
-    // the new document's stack would have no matching beginMacro().
-    endStrokeIfActive();
-
-    m_doc = doc;
-    m_scene->setDocument(doc);
-    resetTransform();
-    centerOn(m_scene->sceneRect().center());
-    emit zoomChanged(zoom());
-    m_selectedTileset = -1;
-    m_selectedImage = -1;
-    m_selectedCellType = -1;
-    if (m_pasteMode)
-        exitPasteMode();
-    clearSelection();
-    updatePaintCursor();
+    return std::max(1, static_cast<int>(std::lround(T * m_zoom)));
 }
 
-void MapView::setSelectedTile(int tilesetIdx, int imageIdx)
+void MapView::documentReplaced()
 {
-    m_selectedTileset = tilesetIdx;
-    m_selectedImage = imageIdx;
-    if (hasSelectedTile()) {
-        m_selectedCellType = -1;
-        if (m_pasteMode)
-            exitPasteMode();
+    m_zoom = 1.0;
+    m_offsetX = 0;
+    m_offsetY = 0;
+    m_cache = QImage();
+    m_cacheMode = -1;
+    m_panning = false;
+    rebuildCache();
+    clampOffsets();
+    emit zoomChanged(m_zoom);
+    emit viewportChanged();
+    update();
+}
+
+void MapView::setZoomEnabled(bool on)
+{
+    m_zoomEnabled = on;
+    if (!on && std::abs(m_zoom - 1.0) > 1e-9) {
+        m_zoom = 1.0;
+        rebuildCache();
+        clampOffsets();
+        emit viewportChanged();
+        update();
     }
-    updatePaintCursor();
+    emit zoomChanged(m_zoom);
 }
 
-void MapView::setSelectedCellType(int cellTypeValue)
+void MapView::resetView()
 {
-    m_selectedCellType = cellTypeValue;
-    if (hasSelectedCellType()) {
-        m_selectedTileset = -1;
-        m_selectedImage = -1;
-        if (m_pasteMode)
-            exitPasteMode();
-    }
-    updatePaintCursor();
-}
-
-QPoint MapView::tileAtViewportPos(QPoint vpPos) const
-{
-    if (!m_doc || !m_doc->isLoaded())
-        return QPoint(-1, -1);
-    const QPointF scenePos = mapToScene(vpPos);
-    const int tx = static_cast<int>(std::floor(scenePos.x() / TileImageCache::TileSize));
-    const int ty = static_cast<int>(std::floor(scenePos.y() / TileImageCache::TileSize));
-    if (tx < 0 || ty < 0 || tx >= m_doc->widthTiles() || ty >= m_doc->heightTiles())
-        return QPoint(-1, -1);
-    return QPoint(tx, ty);
-}
-
-void MapView::clearSelection()
-{
-    if (m_selection.isEmpty() && !m_selectionItem->isVisible())
+    if (!m_doc->isLoaded())
         return;
-    m_selection = QRect();
-    m_selectionItem->setVisible(false);
-    m_selecting = false;
-    emit selectionChanged(QRect());
+    m_zoom = 1.0;
+    const int mapW = m_doc->widthTiles() * T;
+    const int mapH = m_doc->heightTiles() * T;
+    m_offsetX = mapW < width() ? (width() - mapW) / 2 : 0;
+    m_offsetY = mapH < height() ? (height() - mapH) / 2 : 0;
+    rebuildCache();
+    clampOffsets();
+    emit zoomChanged(m_zoom);
+    emit viewportChanged();
+    update();
 }
 
-void MapView::updateSelectionItem()
+void MapView::clampOffsets()
 {
-    if (m_selection.isEmpty()) {
-        m_selectionItem->setVisible(false);
+    if (!m_doc->isLoaded())
         return;
-    }
-    constexpr int T = TileImageCache::TileSize;
-    m_selectionItem->setRect(QRectF(m_selection.x() * T,
-                                    m_selection.y() * T,
-                                    m_selection.width() * T,
-                                    m_selection.height() * T));
-    m_selectionItem->setVisible(true);
+    const int s = tilePx();
+    const int scaledW = m_doc->widthTiles() * s;
+    const int scaledH = m_doc->heightTiles() * s;
+    if (scaledW <= width())
+        m_offsetX = std::clamp(m_offsetX, 0, width() - scaledW);
+    else
+        m_offsetX = std::clamp(m_offsetX, width() - scaledW - kPanMargin, kPanMargin);
+    if (scaledH <= height())
+        m_offsetY = std::clamp(m_offsetY, 0, height() - scaledH);
+    else
+        m_offsetY = std::clamp(m_offsetY, height() - scaledH - kPanMargin, kPanMargin);
 }
 
-void MapView::enterPasteMode(const TileClipboard *clip)
+void MapView::panToCenterTile(int tx, int ty)
 {
-    if (!clip || clip->isEmpty() || !m_doc || !m_doc->isLoaded())
+    if (!m_doc->isLoaded())
         return;
-    m_clipboard = clip;
-    m_pasteMode = true;
-    // Paste excludes other paint modes — but selection rect can stay visible.
-    m_selectedTileset = -1;
-    m_selectedImage = -1;
-    m_selectedCellType = -1;
-    rebuildPastePreview();
-    setDragMode(QGraphicsView::NoDrag);
-    setCursor(Qt::CrossCursor);
-    emit pasteModeChanged(true);
-    emit selectionCleared(); // wipe palettes' visual selection
+    const int s = tilePx();
+    m_offsetX = static_cast<int>(std::lround(width() / 2.0 - (tx + 0.5) * s));
+    m_offsetY = static_cast<int>(std::lround(height() / 2.0 - (ty + 0.5) * s));
+    clampOffsets();
+    emit viewportChanged();
+    update();
 }
 
-void MapView::exitPasteMode()
+QRectF MapView::visibleTileRect() const
 {
-    if (!m_pasteMode)
+    const double s = tilePx();
+    return QRectF(-m_offsetX / s, -m_offsetY / s, width() / s, height() / s);
+}
+
+QPoint MapView::tileAt(const QPoint &pos) const
+{
+    const int s = tilePx();
+    return QPoint(static_cast<int>(std::floor((pos.x() - m_offsetX) / static_cast<double>(s))),
+                  static_cast<int>(std::floor((pos.y() - m_offsetY) / static_cast<double>(s))));
+}
+
+QRect MapView::tileScreenRect(const QRect &tiles) const
+{
+    const int s = tilePx();
+    return QRect(m_offsetX + tiles.x() * s, m_offsetY + tiles.y() * s, tiles.width() * s, tiles.height() * s);
+}
+
+void MapView::setZoomAround(double newZoom, const QPointF &anchor)
+{
+    if (!m_doc->isLoaded())
         return;
-    m_pasteMode = false;
-    m_clipboard = nullptr;
-    m_pastePreview->setVisible(false);
-    updatePaintCursor();
-    emit pasteModeChanged(false);
+    const double oldPx = tilePx();
+    const double mapX = (anchor.x() - m_offsetX) / oldPx;
+    const double mapY = (anchor.y() - m_offsetY) / oldPx;
+    m_zoom = newZoom;
+    const double newPx = tilePx();
+    m_offsetX = static_cast<int>(std::lround(anchor.x() - mapX * newPx));
+    m_offsetY = static_cast<int>(std::lround(anchor.y() - mapY * newPx));
+    rebuildCache();
+    clampOffsets();
+    emit zoomChanged(m_zoom);
+    emit viewportChanged();
+    update();
 }
 
-void MapView::enterCopyMode()
-{
-    // Wipe other modes — copy is exclusive.
-    if (m_pasteMode)
-        exitPasteMode();
-    m_selectedTileset = -1;
-    m_selectedImage = -1;
-    m_selectedCellType = -1;
-    clearSelection();
-    m_copyClickStage = 1;
-    setDragMode(QGraphicsView::NoDrag);
-    setCursor(Qt::CrossCursor);
-    emit copyModeStageChanged(1);
-    emit selectionCleared(); // palettes drop their visual selection
-}
+// ---- Cache -------------------------------------------------------------------
 
-void MapView::exitCopyMode()
+void MapView::rebuildCache()
 {
-    if (m_copyClickStage == 0)
-        return;
-    m_copyClickStage = 0;
-    updatePaintCursor();
-    emit copyModeStageChanged(0);
-}
-
-void MapView::rebuildPastePreview()
-{
-    if (!m_clipboard || m_clipboard->isEmpty() || !m_doc || !m_doc->cache()) {
-        m_pastePreview->setVisible(false);
+    if (!m_doc->isLoaded()) {
+        m_cache = QImage();
         return;
     }
-
-    constexpr int T = TileImageCache::TileSize;
-    const int W = m_clipboard->width();
-    const int H = m_clipboard->height();
-    QImage img(W * T, H * T, QImage::Format_ARGB32);
-    img.fill(Qt::transparent);
-
-    QPainter p(&img);
-    for (int y = 0; y < H; ++y) {
-        for (int x = 0; x < W; ++x) {
-            const auto &c = m_clipboard->at(x, y);
-            if (c.tilesetIdx < 0 || c.imageIdx < 0)
-                continue;
-            const QImage *strip = m_doc->cache()->tileset(
-                static_cast<std::size_t>(c.tilesetIdx));
-            if (!strip)
-                continue;
-            const int srcY = c.imageIdx * T;
-            if (srcY + T > strip->height())
-                continue;
-            p.drawImage(QPoint(x * T, y * T), *strip, QRect(0, srcY, T, T));
-        }
-    }
-    p.end();
-
-    m_pastePreview->setPixmap(QPixmap::fromImage(img));
-    m_pastePreview->setVisible(true);
-}
-
-void MapView::movePastePreviewToTile(QPoint tilePt)
-{
-    if (tilePt.x() < 0 || tilePt.y() < 0) {
-        m_pastePreview->setVisible(false);
+    const int s = tilePx();
+    const int mode = m_editor->renderMode();
+    const qint64 px = static_cast<qint64>(m_doc->widthTiles()) * s
+                    * static_cast<qint64>(m_doc->heightTiles()) * s;
+    // Cache the whole map only when zoomed out (< 50%), where drawing every
+    // visible tile on each paint would be slow; otherwise draw directly.
+    if (px > kMaxCachePixels || s >= 16) {
+        m_cache = QImage();
+        m_cacheTilePx = s;
+        m_cacheMode = mode;
         return;
     }
-    constexpr int T = TileImageCache::TileSize;
-    m_pastePreview->setPos(tilePt.x() * T, tilePt.y() * T);
-    m_pastePreview->setVisible(true);
+    if (!m_cache.isNull() && m_cacheTilePx == s && m_cacheMode == mode)
+        return;
+    m_cache = QImage(m_doc->widthTiles() * s, m_doc->heightTiles() * s, QImage::Format_RGB32);
+    if (m_cache.isNull())
+        return;
+    m_cacheTilePx = s;
+    m_cacheMode = mode;
+    m_cache.fill(Qt::black);
+    QPainter p(&m_cache);
+    MapRenderer::drawTiles(p, *m_doc, QRect(0, 0, m_doc->widthTiles(), m_doc->heightTiles()),
+                           s, QPoint(0, 0), mode);
 }
 
-void MapView::updatePaintCursor()
+void MapView::updateCacheRegion(const QRect &tiles)
 {
-    if (hasSelectedTile() || hasSelectedCellType()) {
-        setDragMode(QGraphicsView::NoDrag);
-        setCursor(Qt::CrossCursor);
+    if (m_cache.isNull())
+        return;
+    const int s = m_cacheTilePx;
+    QPainter p(&m_cache);
+    const QRect r(tiles.x() * s, tiles.y() * s, tiles.width() * s, tiles.height() * s);
+    p.fillRect(r, Qt::black);
+    p.setClipRect(r);
+    MapRenderer::drawTiles(p, *m_doc, tiles, s, QPoint(0, 0), m_cacheMode);
+}
+
+void MapView::onRegionChanged(const QRect &tiles)
+{
+    updateCacheRegion(tiles);
+    update(tileScreenRect(tiles).adjusted(-2, -2, 2, 2));
+}
+
+// ---- Paint -------------------------------------------------------------------
+
+void MapView::paintEvent(QPaintEvent *event)
+{
+    QPainter p(this);
+    p.fillRect(event->rect(), Qt::black);
+    if (!m_doc->isLoaded())
+        return;
+
+    const int s = tilePx();
+    const QRect dirty = event->rect();
+    // Visible tiles with a 1-tile margin, clipped to the map.
+    QRect tiles(QPoint(static_cast<int>(std::floor((dirty.left() - m_offsetX) / double(s))) - 1,
+                       static_cast<int>(std::floor((dirty.top() - m_offsetY) / double(s))) - 1),
+                QPoint(static_cast<int>(std::ceil((dirty.right() - m_offsetX) / double(s))) + 1,
+                       static_cast<int>(std::ceil((dirty.bottom() - m_offsetY) / double(s))) + 1));
+    tiles = tiles.intersected(QRect(0, 0, m_doc->widthTiles(), m_doc->heightTiles()));
+    if (tiles.isEmpty())
+        return;
+
+    const QPoint origin(m_offsetX, m_offsetY);
+    if (!m_cache.isNull() && m_cacheTilePx == s && m_cacheMode == m_editor->renderMode()) {
+        const QRect src(tiles.x() * s, tiles.y() * s, tiles.width() * s, tiles.height() * s);
+        p.drawImage(src.topLeft() + origin, m_cache, src);
     } else {
-        setDragMode(QGraphicsView::ScrollHandDrag);
-        unsetCursor();
+        MapRenderer::drawTiles(p, *m_doc, tiles, s, origin, m_editor->renderMode());
+    }
+    MapRenderer::drawOverlays(p, *m_doc, tiles, s, origin, rect(), m_editor->overlays());
+    paintOverlays(p, tiles);
+}
+
+void MapView::paintOverlays(QPainter &p, const QRect &visibleTiles)
+{
+    const int s = tilePx();
+
+    // Enclosed-area highlight
+    if (m_editor->highlightEnclosed()) {
+        const QColor magenta(255, 0, 255, 120);
+        for (const QPoint &t : m_editor->enclosedTiles()) {
+            if (visibleTiles.contains(t))
+                p.fillRect(m_offsetX + t.x() * s, m_offsetY + t.y() * s, s, s, magenta);
+        }
+    }
+
+    // Paste and tile-group previews (only while edit mode is on)
+    if (m_editor->editMode() && m_editor->pasteMode() && m_editor->pastePreviewPos().x() >= 0) {
+        const auto &c = m_editor->clipboard();
+        const QPoint pp = m_editor->pastePreviewPos();
+        p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        p.drawImage(QRect(m_offsetX + pp.x() * s, m_offsetY + pp.y() * s, c.width * s, c.height * s),
+                    m_editor->pastePreviewImage());
+    }
+    if (m_editor->editMode() && m_editor->tileGroupMode() && m_editor->tileGroupPreviewPos().x() >= 0) {
+        const auto &g = m_editor->tileGroup();
+        const QPoint gp = m_editor->tileGroupPreviewPos();
+        p.drawImage(QRect(m_offsetX + gp.x() * s, m_offsetY + gp.y() * s, g.width * s, g.height * s),
+                    m_editor->tileGroupPreviewImage());
+    }
+
+    // Copy selection
+    if (m_editor->copyMode() && m_editor->copyStage() >= 1) {
+        const QRect tr = m_editor->copyRect();
+        if (!tr.isEmpty()) {
+            const bool copied = m_editor->copyStage() == 2;
+            const QColor colour = copied ? QColor(0, 191, 255) : QColor(0, 255, 0);
+            const QRect r = tileScreenRect(tr);
+            QColor fill = colour;
+            fill.setAlpha(50);
+            p.fillRect(r, fill);
+            p.setPen(QPen(Qt::black, 3));
+            p.setBrush(Qt::NoBrush);
+            p.drawRect(r);
+            QPen dash(colour, 2);
+            dash.setStyle(Qt::DashLine);
+            p.setPen(dash);
+            p.drawRect(r);
+            QFont f(QStringLiteral("Segoe UI"));
+            f.setPixelSize(12);
+            f.setBold(true);
+            p.setFont(f);
+            const QString text = QStringLiteral("%1x%2").arg(tr.width()).arg(tr.height())
+                               + (copied ? QStringLiteral(" copied") : QString());
+            const QFontMetrics fm(f);
+            const QRect box(r.left() + 2, r.top() + 2, fm.horizontalAdvance(text) + 4, fm.height());
+            p.fillRect(box, QColor(0, 0, 0, 170));
+            p.setPen(colour);
+            p.drawText(box, Qt::AlignCenter, text);
+        }
+    }
+
+    // Terrain brush outline
+    if (m_editor->terrainToolActive() && m_editor->brushHover().x() >= 0) {
+        const QPoint h = m_editor->brushHover();
+        const int half = m_editor->brushSize() / 2;
+        const QRect r = tileScreenRect(QRect(h.x() - half, h.y() - half, 2 * half + 1, 2 * half + 1));
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(Qt::black, 3));
+        p.drawEllipse(r);
+        p.setPen(QPen(m_editor->terrainGroundColor(), 1.5));
+        p.drawEllipse(r);
+        p.setRenderHint(QPainter::Antialiasing, false);
+    }
+
+    // Cliff preview
+    if (m_editor->cliffToolActive() && !m_editor->cliffPoints().isEmpty()) {
+        const QColor colour(255, 210, 90);
+        const auto &pts = m_editor->cliffPoints();
+        auto centre = [&](const QPoint &t) {
+            return QPointF(m_offsetX + (t.x() + 0.5) * s, m_offsetY + (t.y() + 0.5) * s);
+        };
+        p.setRenderHint(QPainter::Antialiasing, true);
+        for (int i = 1; i < pts.size(); ++i) {
+            p.setPen(QPen(Qt::black, 5));
+            p.drawLine(centre(pts[i - 1]), centre(pts[i]));
+            p.setPen(QPen(colour, 3));
+            p.drawLine(centre(pts[i - 1]), centre(pts[i]));
+        }
+        if (m_editor->cliffCursor().x() >= 0) {
+            QPen dash(colour, 2);
+            dash.setStyle(Qt::DashLine);
+            p.setPen(dash);
+            p.drawLine(centre(pts.last()), centre(m_editor->cliffCursor()));
+        }
+        p.setRenderHint(QPainter::Antialiasing, false);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(colour, 3));
+        const double side = 2.0 * s;
+        for (int i = 0; i < pts.size(); ++i) {
+            const QPointF c = centre(pts[i]);
+            const QRectF box(c.x() - side / 2, c.y() - side / 2, side, side);
+            p.drawRect(box);
+            if (i == 0 && pts.size() > 1)
+                p.drawRect(box.adjusted(4, 4, -4, -4));
+        }
+    }
+
+    // Selected tile box
+    const QPoint cur = m_editor->currentTile();
+    if (cur.x() >= 0 && m_doc->inBounds(cur.x(), cur.y())) {
+        p.setPen(QPen(Qt::white, 2));
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(QRectF(m_offsetX + cur.x() * s + 1, m_offsetY + cur.y() * s + 1, s - 2, s - 2));
     }
 }
 
-bool MapView::paintAtViewportPos(QPoint vpPos)
+// ---- Input -------------------------------------------------------------------
+
+void MapView::updateCursor()
 {
-    if (!m_doc || !m_doc->isLoaded())
-        return false;
-    const QPointF scenePos = mapToScene(vpPos);
-    const int tx = static_cast<int>(std::floor(scenePos.x() / TileImageCache::TileSize));
-    const int ty = static_cast<int>(std::floor(scenePos.y() / TileImageCache::TileSize));
-    if (tx < 0 || ty < 0 || tx >= m_doc->widthTiles() || ty >= m_doc->heightTiles())
-        return false;
-
-    // The stroke macro opens lazily, right before the first command that will
-    // actually change the map. Opening it eagerly on mouse-press would commit
-    // an empty macro for no-op clicks (same tile, bottom row, off-map), which
-    // both pollutes the undo history and flips the stack's clean flag —
-    // showing a phantom "unsaved changes" marker.
-    auto ensureStrokeMacro = [this](const QString &text) {
-        if (m_inStroke && !m_strokeMacroOpen) {
-            m_doc->undoStack()->beginMacro(text);
-            m_strokeMacroOpen = true;
-        }
-    };
-
-    if (hasSelectedTile()) {
-        if (!m_doc->wouldPaintTileChange(tx, ty, m_selectedTileset, m_selectedImage))
-            return false;
-        ensureStrokeMacro(tr("Paint tiles"));
-        m_doc->pushPaintTile(tx, ty, m_selectedTileset, m_selectedImage);
-        return true;
-    }
-    if (hasSelectedCellType()) {
-        const auto ct = static_cast<OP2Utility::CellType>(m_selectedCellType);
-        if (!m_doc->wouldPaintCellTypeChange(tx, ty, ct))
-            return false;
-        ensureStrokeMacro(tr("Paint cell types"));
-        m_doc->pushPaintCellType(tx, ty, ct);
-        return true;
-    }
-    return false;
+    if (m_panning)
+        setCursor(Qt::OpenHandCursor);
+    else if (m_editor->pasteMode() || m_editor->tileGroupMode() || m_editor->terrainToolActive()
+             || m_editor->cliffToolActive())
+        setCursor(Qt::CrossCursor);
+    else
+        unsetCursor();
 }
 
 void MapView::mousePressEvent(QMouseEvent *event)
 {
-    const bool painting = hasSelectedTile() || hasSelectedCellType();
-    const bool shift = (event->modifiers() & Qt::ShiftModifier);
-
-    // Two-click copy mode — first click sets start, second click finalizes.
-    if (m_copyClickStage > 0) {
-        if (event->button() == Qt::RightButton) {
-            clearSelection();
-            exitCopyMode();
-            event->accept();
-            return;
-        }
-        if (event->button() == Qt::LeftButton) {
-            const QPoint tp = tileAtViewportPos(event->position().toPoint());
-            if (tp.x() < 0) { event->accept(); return; }
-            if (m_copyClickStage == 1) {
-                m_selectionDragStart = tp;
-                m_selection = QRect(tp, QSize(1, 1));
-                updateSelectionItem();
-                m_copyClickStage = 2;
-                emit copyModeStageChanged(2);
-            } else {
-                const int x0 = std::min(m_selectionDragStart.x(), tp.x());
-                const int y0 = std::min(m_selectionDragStart.y(), tp.y());
-                const int x1 = std::max(m_selectionDragStart.x(), tp.x());
-                const int y1 = std::max(m_selectionDragStart.y(), tp.y());
-                m_selection = QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
-                updateSelectionItem();
-                exitCopyMode();
-                emit selectionChanged(m_selection);
-            }
-            event->accept();
-            return;
-        }
-    }
-
-    // Paste mode takes precedence (entered explicitly via Ctrl+V).
-    if (m_pasteMode) {
-        if (event->button() == Qt::LeftButton && m_clipboard) {
-            const QPoint tp = tileAtViewportPos(event->position().toPoint());
-            if (tp.x() >= 0 && m_doc) {
-                m_doc->pushPlaceTiles(tp.x(), tp.y(), *m_clipboard);
-            }
-            exitPasteMode();
-            event->accept();
-            return;
-        }
-        if (event->button() == Qt::RightButton) {
-            exitPasteMode();
-            event->accept();
-            return;
-        }
-    }
-
-    // Shift+left starts (or restarts) a rectangular selection drag.
-    if (event->button() == Qt::LeftButton && shift && m_doc && m_doc->isLoaded()) {
-        const QPoint tp = tileAtViewportPos(event->position().toPoint());
-        if (tp.x() >= 0) {
-            m_selecting = true;
-            m_selectionDragStart = tp;
-            m_selection = QRect(tp, QSize(1, 1));
-            updateSelectionItem();
-            emit selectionChanged(m_selection);
-            event->accept();
-            return;
-        }
-    }
-
-    if (event->button() == Qt::LeftButton && painting && m_doc) {
-        // Marks the gesture only — the undo macro itself opens lazily inside
-        // paintAtViewportPos once a tile actually changes.
-        m_inStroke = true;
-        paintAtViewportPos(event->position().toPoint());
-        event->accept();
+    setFocus();
+    if (!m_doc->isLoaded())
         return;
-    }
-    if (event->button() == Qt::RightButton && painting) {
-        m_selectedTileset = -1;
-        m_selectedImage = -1;
-        m_selectedCellType = -1;
-        updatePaintCursor();
-        emit selectionCleared();
-        event->accept();
-        return;
-    }
-    if (event->button() == Qt::RightButton && hasSelection()) {
-        clearSelection();
-        event->accept();
-        return;
-    }
-    // Right-click on an idle view → context menu (handled by MainWindow).
-    if (event->button() == Qt::RightButton) {
-        emit contextMenuRequested(event->globalPosition().toPoint());
-        event->accept();
-        return;
-    }
-    QGraphicsView::mousePressEvent(event);
-}
-
-void MapView::mouseReleaseEvent(QMouseEvent *event)
-{
+    const QPoint pos = event->position().toPoint();
     if (event->button() == Qt::LeftButton) {
-        if (m_selecting) {
-            m_selecting = false;
-            emit selectionChanged(m_selection);
-        }
-        endStrokeIfActive();
+        const QPoint t = tileAt(pos);
+        if (m_doc->inBounds(t.x(), t.y()))
+            m_editor->mapLeftPress(t);
+    } else if (event->button() == Qt::RightButton) {
+        m_panning = true;
+        m_rightDownPos = pos;
+        m_lastMouse = pos;
+        setCursor(Qt::OpenHandCursor);
     }
-    QGraphicsView::mouseReleaseEvent(event);
-}
-
-void MapView::endStrokeIfActive()
-{
-    if (!m_inStroke)
-        return;
-    m_inStroke = false;
-    // The macro only exists if at least one paint in this stroke changed the
-    // map (see paintAtViewportPos) — no-op strokes have nothing to close.
-    if (m_strokeMacroOpen && m_doc)
-        m_doc->undoStack()->endMacro();
-    m_strokeMacroOpen = false;
-}
-
-double MapView::zoom() const
-{
-    return transform().m11();
-}
-
-void MapView::resetZoom()
-{
-    resetTransform();
-    emit zoomChanged(zoom());
-    emit viewportChanged();
-}
-
-QRectF MapView::visibleSceneRect() const
-{
-    return mapToScene(viewport()->rect()).boundingRect();
-}
-
-void MapView::centerOnScene(QPointF scenePos)
-{
-    centerOn(scenePos);
-    emit viewportChanged();
-}
-
-void MapView::scrollContentsBy(int dx, int dy)
-{
-    QGraphicsView::scrollContentsBy(dx, dy);
-    emit viewportChanged();
-}
-
-void MapView::resizeEvent(QResizeEvent *event)
-{
-    QGraphicsView::resizeEvent(event);
-    emit viewportChanged();
-}
-
-void MapView::setShowGrid(bool on)
-{
-    m_scene->setShowGrid(on);
-}
-
-void MapView::setShowLargeGrid(bool on)
-{
-    m_scene->setShowLargeGrid(on);
-}
-
-void MapView::setShowCoords(bool on)
-{
-    m_scene->setShowCoords(on);
-}
-
-void MapView::setRenderMode(int mode)
-{
-    m_scene->setRenderMode(static_cast<MapScene::RenderMode>(mode));
 }
 
 void MapView::mouseMoveEvent(QMouseEvent *event)
 {
-    QGraphicsView::mouseMoveEvent(event);
-
-    // While Shift-drag-selecting, extend the rectangle.
-    if (m_selecting && (event->buttons() & Qt::LeftButton)) {
-        const QPoint tp = tileAtViewportPos(event->position().toPoint());
-        if (tp.x() >= 0) {
-            const int x0 = std::min(m_selectionDragStart.x(), tp.x());
-            const int y0 = std::min(m_selectionDragStart.y(), tp.y());
-            const int x1 = std::max(m_selectionDragStart.x(), tp.x());
-            const int y1 = std::max(m_selectionDragStart.y(), tp.y());
-            m_selection = QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
-            updateSelectionItem();
-        }
-    }
-
-    // Two-click copy stage 2 — preview the rectangle from start to cursor.
-    if (m_copyClickStage == 2) {
-        const QPoint tp = tileAtViewportPos(event->position().toPoint());
-        if (tp.x() >= 0) {
-            const int x0 = std::min(m_selectionDragStart.x(), tp.x());
-            const int y0 = std::min(m_selectionDragStart.y(), tp.y());
-            const int x1 = std::max(m_selectionDragStart.x(), tp.x());
-            const int y1 = std::max(m_selectionDragStart.y(), tp.y());
-            m_selection = QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
-            updateSelectionItem();
-        }
-    }
-
-    // Drag-paint when a tile or cell-type is selected and left button is held.
-    if (!m_selecting && (hasSelectedTile() || hasSelectedCellType())
-        && (event->buttons() & Qt::LeftButton)) {
-        paintAtViewportPos(event->position().toPoint());
-    }
-
-    // Move paste preview to follow the cursor's tile.
-    if (m_pasteMode) {
-        movePastePreviewToTile(tileAtViewportPos(event->position().toPoint()));
-    }
-
-    if (!m_doc || !m_doc->isLoaded()) {
-        emit tileHovered(0, 0);
+    if (!m_doc->isLoaded())
         return;
+    const QPoint pos = event->position().toPoint();
+    const QPoint t = tileAt(pos);
+    const bool inside = m_doc->inBounds(t.x(), t.y());
+    if (inside)
+        emit hoverTile(t.x(), t.y());
+    if (!m_panning)
+        m_editor->mapMouseMove(t, inside, event->buttons() & Qt::LeftButton);
+
+    if (m_panning && (event->buttons() & Qt::RightButton)) {
+        m_offsetX += pos.x() - m_lastMouse.x();
+        m_offsetY += pos.y() - m_lastMouse.y();
+        clampOffsets();
+        emit viewportChanged();
+        update();
     }
-    const QPointF scenePos = mapToScene(event->position().toPoint());
-    const int tx = static_cast<int>(std::floor(scenePos.x() / TileImageCache::TileSize));
-    const int ty = static_cast<int>(std::floor(scenePos.y() / TileImageCache::TileSize));
-    if (tx < 0 || ty < 0 || tx >= m_doc->widthTiles() || ty >= m_doc->heightTiles()) {
-        emit tileHovered(0, 0);
-        return;
-    }
-    // OP2 uses 1-based map coordinates.
-    emit tileHovered(tx + 1, ty + 1);
+    m_lastMouse = pos;
 }
 
-void MapView::leaveEvent(QEvent *event)
+void MapView::mouseReleaseEvent(QMouseEvent *event)
 {
-    emit tileHovered(0, 0);
-    QGraphicsView::leaveEvent(event);
+    const QPoint pos = event->position().toPoint();
+    if (event->button() == Qt::LeftButton) {
+        m_editor->mapLeftRelease();
+    } else if (event->button() == Qt::RightButton && m_panning) {
+        m_panning = false;
+        updateCursor();
+        const QPoint d = pos - m_rightDownPos;
+        const double dist = std::sqrt(double(d.x()) * d.x() + double(d.y()) * d.y());
+        if (dist < 5 && m_doc->isLoaded() && !m_editor->editDragging()) {
+            m_contextPos = pos;
+            emit contextMenuRequested(event->globalPosition().toPoint());
+        }
+    }
 }
 
 void MapView::wheelEvent(QWheelEvent *event)
 {
-    if (event->modifiers() & Qt::ControlModifier) {
-        const double factor = event->angleDelta().y() > 0 ? 1.25 : 0.8;
-        scale(factor, factor);
-        emit zoomChanged(zoom());
-        emit viewportChanged();
-        event->accept();
+    event->accept();
+    if (!m_doc->isLoaded())
+        return;
+    const int delta = event->angleDelta().y();
+    if (delta == 0)
+        return;
+    if ((event->modifiers() & Qt::ControlModifier) && m_editor->terrainToolActive()) {
+        m_editor->stepBrushSize(delta > 0 ? 2 : -2);
         return;
     }
-    QGraphicsView::wheelEvent(event);
+    if (!m_zoomEnabled)
+        return;
+    int idx = -1;
+    int nearest = 0;
+    double best = 1e9;
+    for (int i = 0; i < int(std::size(kZoomSteps)); ++i) {
+        const double d = std::abs(kZoomSteps[i] - m_zoom);
+        if (d < 0.01)
+            idx = i;
+        if (d < best) {
+            best = d;
+            nearest = i;
+        }
+    }
+    if (idx < 0)
+        idx = nearest;
+    idx = delta > 0 ? std::min(idx + 1, int(std::size(kZoomSteps)) - 1) : std::max(idx - 1, 0);
+    if (std::abs(kZoomSteps[idx] - m_zoom) < 1e-9)
+        return;
+    setZoomAround(kZoomSteps[idx], event->position());
+}
+
+void MapView::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    if (m_doc->isLoaded()) {
+        const int s = tilePx();
+        const int mapW = m_doc->widthTiles() * s;
+        const int mapH = m_doc->heightTiles() * s;
+        if (mapW < width())
+            m_offsetX = (width() - mapW) / 2;
+        else
+            m_offsetX = std::clamp(m_offsetX, width() - mapW, 0);
+        if (mapH < height())
+            m_offsetY = (height() - mapH) / 2;
+        else
+            m_offsetY = std::clamp(m_offsetY, height() - mapH, 0);
+        clampOffsets();
+    }
+    emit viewportChanged();
+}
+
+void MapView::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (event->mimeData()->hasUrls())
+        event->acceptProposedAction();
+}
+
+void MapView::dropEvent(QDropEvent *event)
+{
+    QStringList paths;
+    for (const QUrl &u : event->mimeData()->urls()) {
+        if (u.isLocalFile())
+            paths << u.toLocalFile();
+    }
+    if (!paths.isEmpty())
+        emit filesDropped(paths);
+}
+
+QImage MapView::grabView()
+{
+    return grab().toImage();
 }

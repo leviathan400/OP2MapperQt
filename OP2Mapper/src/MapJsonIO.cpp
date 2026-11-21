@@ -260,7 +260,7 @@ bool exportToJson(const MapDocument &doc,
 bool importFromJson(const QString &jsonPath,
                     MapDocument &doc,
                     const QString &op2Folder,
-                    QStringList &missingTilesets,
+                    MapLoadInfo &info,
                     QString &errorOut)
 {
     QFile f(jsonPath);
@@ -292,68 +292,81 @@ bool importFromJson(const QString &jsonPath,
         return false;
     }
 
-    if (!doc.load(blankPath, op2Folder, errorOut, missingTilesets))
+    try {
+        // Build the whole map in memory first: a failed import leaves the
+        // open map untouched, and the tileset cache is built from the
+        // imported tileset list.
+        OP2Utility::Map map = MapDocument::readMapFile(blankPath);
+
+        // Tileset sources only; the template's tileMappings/terrainTypes stay.
+        if (root.contains(QStringLiteral("tileset"))) {
+            const QJsonObject ts = root.value(QStringLiteral("tileset")).toObject();
+            if (ts.contains(QStringLiteral("sources"))) {
+                map.tilesetSources.clear();
+                for (const auto &v : ts.value(QStringLiteral("sources")).toArray()) {
+                    const QJsonObject o = v.toObject();
+                    OP2Utility::TilesetSource src;
+                    src.tilesetFilename = o.value(QStringLiteral("filename")).toString().toStdString();
+                    src.numTiles = static_cast<uint32_t>(o.value(QStringLiteral("numTiles")).toInt());
+                    map.tilesetSources.push_back(src);
+                }
+            }
+        }
+
+        const int mappingCount = static_cast<int>(map.tileMappings.size());
+        auto tileAt = [&](int x, int y) -> OP2Utility::Tile & {
+            const std::size_t lowerX = static_cast<std::size_t>(x) & 0x1F;
+            const std::size_t upperX = static_cast<std::size_t>(x) >> 5;
+            return map.tiles[(upperX * map.HeightInTiles() + static_cast<std::size_t>(y)) * 32 + lowerX];
+        };
+        int badMappings = 0, badCells = 0;
+        if (root.contains(QStringLiteral("tiles"))) {
+            const QJsonArray rows = root.value(QStringLiteral("tiles")).toArray();
+            for (int y = 0; y < rows.size() && y < h; ++y) {
+                const QJsonArray row = rows.at(y).toArray();
+                for (int x = 0; x < row.size() && x < w; ++x) {
+                    const int m = row.at(x).toInt(-1);
+                    if (m < 0 || m >= mappingCount) {
+                        ++badMappings;
+                        continue;
+                    }
+                    tileAt(x, y).tileMappingIndex = static_cast<unsigned>(m);
+                }
+            }
+        }
+        if (root.contains(QStringLiteral("cellTypes"))) {
+            const QJsonArray rows = root.value(QStringLiteral("cellTypes")).toArray();
+            for (int y = 0; y < rows.size() && y < h; ++y) {
+                const QJsonArray row = rows.at(y).toArray();
+                for (int x = 0; x < row.size() && x < w; ++x) {
+                    const int ct = row.at(x).toInt(-1);
+                    if (ct < 0 || ct > 31) {
+                        ++badCells;
+                        continue;
+                    }
+                    tileAt(x, y).cellType = static_cast<OP2Utility::CellType>(ct);
+                }
+            }
+        }
+        if (root.contains(QStringLiteral("clipRect"))) {
+            const QJsonObject c = root.value(QStringLiteral("clipRect")).toObject();
+            map.clipRect.x1 = c.value(QStringLiteral("x1")).toInt();
+            map.clipRect.y1 = c.value(QStringLiteral("y1")).toInt();
+            map.clipRect.x2 = c.value(QStringLiteral("x2")).toInt();
+            map.clipRect.y2 = c.value(QStringLiteral("y2")).toInt();
+        }
+        if (!doc.loadMap(std::move(map), QString(), op2Folder, errorOut, info))
+            return false;
+        if (badMappings || badCells) {
+            errorOut = QStringLiteral("%1 tile value(s) used mapping indices the template doesn't have, and %2 "
+                                      "cell type value(s) were out of range; those tiles kept the template's values.")
+                           .arg(badMappings).arg(badCells);
+        }
+        return true;
+    } catch (const std::exception &e) {
+        errorOut = QString::fromUtf8(e.what());
         return false;
-
-    // Note: we don't capture undo entries for import — it's a fresh load.
-    // Switching to direct manipulation via the OP2Utility map.
-    auto *map = const_cast<OP2Utility::Map *>(doc.map());
-    if (!map) {
-        errorOut = QStringLiteral("Blank map didn't load");
-        return false;
     }
-
-    // Overlay tiles
-    if (root.contains(QStringLiteral("tiles"))) {
-        const QJsonArray rows = root.value(QStringLiteral("tiles")).toArray();
-        for (int y = 0; y < rows.size() && y < h; ++y) {
-            const QJsonArray row = rows.at(y).toArray();
-            for (int x = 0; x < row.size() && x < w; ++x) {
-                doc.setMappingIndexAt(x, y,
-                    static_cast<unsigned>(row.at(x).toInt()));
-            }
-        }
-    }
-
-    // Overlay cell types
-    if (root.contains(QStringLiteral("cellTypes"))) {
-        const QJsonArray rows = root.value(QStringLiteral("cellTypes")).toArray();
-        for (int y = 0; y < rows.size() && y < h; ++y) {
-            const QJsonArray row = rows.at(y).toArray();
-            for (int x = 0; x < row.size() && x < w; ++x) {
-                doc.setCellTypeAt(x, y,
-                    static_cast<OP2Utility::CellType>(row.at(x).toInt()));
-            }
-        }
-    }
-
-    // Clip rect
-    if (root.contains(QStringLiteral("clipRect"))) {
-        const QJsonObject c = root.value(QStringLiteral("clipRect")).toObject();
-        map->clipRect.x1 = c.value(QStringLiteral("x1")).toInt();
-        map->clipRect.y1 = c.value(QStringLiteral("y1")).toInt();
-        map->clipRect.x2 = c.value(QStringLiteral("x2")).toInt();
-        map->clipRect.y2 = c.value(QStringLiteral("y2")).toInt();
-    }
-
-    // Tileset sources only — keep template's tileMappings/terrainTypes.
-    if (root.contains(QStringLiteral("tileset"))) {
-        const QJsonObject ts = root.value(QStringLiteral("tileset")).toObject();
-        if (ts.contains(QStringLiteral("sources"))) {
-            const QJsonArray sources = ts.value(QStringLiteral("sources")).toArray();
-            map->tilesetSources.clear();
-            for (const auto &v : sources) {
-                const QJsonObject o = v.toObject();
-                OP2Utility::TilesetSource src;
-                src.tilesetFilename = o.value(QStringLiteral("filename")).toString().toStdString();
-                src.numTiles = static_cast<uint32_t>(
-                    o.value(QStringLiteral("numTiles")).toInt());
-                map->tilesetSources.push_back(src);
-            }
-        }
-    }
-
-    return true;
 }
 
 } // namespace MapJsonIO

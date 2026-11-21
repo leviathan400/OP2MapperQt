@@ -1,26 +1,53 @@
 #pragma once
 
 #include <QDialog>
+#include <functional>
 
 class QComboBox;
+class QLabel;
+class QLineEdit;
+class QPlainTextEdit;
 
-// Modal dialog letting the user pick a blank-map template size when creating
-// a new map. Mirrors VB fNewMap.vb's size selector (10 fixed templates).
-// Biome presets from the VB version are intentionally deferred.
+// File > New Map (OP2Mapper3 fNewMap): name, auto file name, tileset,
+// notes, size and starting biome. The owner supplies the create step:
+// returning false keeps the dialog open.
 class NewMapDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit NewMapDialog(QWidget *parent = nullptr);
+    enum Biome { Blank = 0, Terrain0, Terrain1, Terrain2 };
 
-    int selectedWidth() const { return m_width; }
-    int selectedHeight() const { return m_height; }
+    struct Result {
+        QString mapName;
+        QString fileName;
+        QString tileset;
+        QString notes;
+        int width = 128;
+        int height = 128;
+        Biome biome = Blank;
+    };
 
-private slots:
-    void onAccept();
+    using CreateFn = std::function<bool(const Result &)>;
+    NewMapDialog(CreateFn create, QWidget *parent = nullptr);
+
+    // Error from extracting the blank templates (shown on open), if any.
+    void reportTemplateProblems();
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    QComboBox *m_sizeCombo = nullptr;
-    int m_width = 0;
-    int m_height = 0;
+    void regenerateFileName();
+    void selectBiome(int index);
+    void onOk();
+
+    CreateFn m_create;
+    QLineEdit *m_mapName = nullptr;
+    QLineEdit *m_fileName = nullptr;
+    QLineEdit *m_tileset = nullptr;
+    QPlainTextEdit *m_notes = nullptr;
+    QComboBox *m_size = nullptr;
+    QList<QLabel *> m_biomePanels;
+    QList<QLabel *> m_biomeLabels;
+    int m_biome = 0;
 };

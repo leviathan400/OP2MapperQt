@@ -1,112 +1,248 @@
 #pragma once
 
 #include <QObject>
+#include <QRect>
 #include <QString>
 #include <QStringList>
+#include <QUndoCommand>
 #include <memory>
+#include <vector>
 
-namespace OP2Utility { class Map; class ResourceManager; enum class CellType; }
+#include <OP2Utility.h>
 
-class TileClipboard;
+class MapDocument;
 class TileImageCache;
 class QUndoStack;
 
-// The document: owns the loaded OP2Utility::Map plus everything whose
-// lifetime is tied to it (ResourceManager for .vol/.bmp access, the
-// TileImageCache of decoded tileset graphics, the QUndoStack).
+// Base for every map edit. Commands are applied by MapDocument::execute()
+// BEFORE they are recorded (as in OP2Mapper3's ExecuteCommand), so the
+// first redo() QUndoStack makes on push is skipped.
+class MapCommand : public QUndoCommand
+{
+public:
+    explicit MapCommand(MapDocument *doc) : m_doc(doc) {}
+    virtual void apply() = 0;
+    virtual void revert() = 0;
+    void redo() final;
+    void undo() final;
+    void markApplied() { m_skipRedo = true; }
+
+protected:
+    MapDocument *m_doc;
+
+private:
+    bool m_skipRedo = false;
+};
+
+// Result of loading a map, for the tileset warnings OP2Mapper3 shows.
+struct MapLoadInfo {
+    bool tilesetDirFound = false;
+    QString tilesetDir;
+    int tilesetsTotal = 0;   // non-empty sources
+    int tilesetsLoaded = 0;
+    QStringList missingTilesets;
+};
+
+// One terrain/cliff/blend change (op2maplib om_change applied by the editor).
+struct TileChange {
+    int x = 0, y = 0;
+    int oldMapping = 0, newMapping = 0;
+    int oldCellType = 0, newCellType = 0;
+};
+
+// The document: the loaded OP2Utility::Map, its tileset graphics and the
+// undo stack. All coordinates are 0-based (x, y); the .map column-block
+// storage is hidden behind mappingIndexAt / cellTypeAt.
 //
-// Mutation model — three layers, strictly ordered:
-//   1. set*/apply* methods write the map directly and emit tileChanged.
-//      No undo recording. Only QUndoCommands and bulk importers call these.
-//   2. push* methods wrap an edit in a QUndoCommand and put it on the
-//      stack. All interactive editing goes through these.
-//   3. would*Change queries are the no-op predicates for layer 2, exposed
-//      so MapView can decide whether to open a stroke macro BEFORE any
-//      command exists (see MapView's stroke-lifecycle comments).
-//
-// Dirty state is not a flag — it's derived from QUndoStack cleanliness
-// (isDirty() == !stack->isClean()), so undoing back to the last save
-// correctly clears the title-bar marker.
-//
-// Storage quirk inherited from the .map format: tiles are NOT row-major.
-// Maps store tiles in 32-tile-wide column blocks; see tileIndex() in the
-// .cpp for the index math. All public APIs take ordinary (x, y).
+// Edits:
+//   - execute(cmd) applies a command and records it (or adds it to the
+//     open stroke). beginStroke/endStroke group a drag into one undo step:
+//     0 commands -> nothing, 1 -> the command itself, more -> a composite.
+//   - Undo history is capped at 500 steps.
+//   - Dirty = undo stack not at its clean index, or an open stroke with
+//     edits. markNewUnsaved() makes the clean state unreachable (New Map).
 class MapDocument : public QObject
 {
     Q_OBJECT
 public:
+    static constexpr int MaxUndoSteps = 500;
+
     explicit MapDocument(QObject *parent = nullptr);
     ~MapDocument() override;
 
-    // Loads the map and its tilesets. Returns true on success.
-    // On success, missingTilesets contains tileset filenames that couldn't be resolved.
+    // Builds the new map and tilesets into locals and swaps them in only on
+    // success; on failure the current map, history and path are untouched.
     bool load(const QString &mapPath, const QString &op2Folder,
-              QString &errorOut, QStringList &missingTilesets);
-
-    // Closes the currently-loaded map and clears the undo stack.
-    // The QUndoStack itself is preserved so any QActions bound to it stay live.
+              QString &errorOut, MapLoadInfo &info);
+    // Same, for a map built in memory (JSON import). `path` may be empty.
+    bool loadMap(OP2Utility::Map &&map, const QString &path, const QString &op2Folder,
+                 QString &errorOut, MapLoadInfo &info);
     void reset();
 
     bool isLoaded() const { return m_map != nullptr; }
     const OP2Utility::Map *map() const { return m_map.get(); }
+    OP2Utility::Map *mutableMap() { return m_map.get(); }
     const TileImageCache *cache() const { return m_cache.get(); }
     QUndoStack *undoStack() const { return m_undoStack; }
 
     int widthTiles() const;
     int heightTiles() const;
+    int lastRow() const { return heightTiles() - 1; }
+    int mappingCount() const;
+    bool inBounds(int x, int y) const;
 
-    // Reads — 0-based coords. Safe to call when not loaded.
-    OP2Utility::CellType cellTypeAt(int x, int y) const;
-    unsigned mappingIndexAt(int x, int y) const;
+    // Reads; safe when not loaded (0 / -1).
+    int cellTypeAt(int x, int y) const;
+    int mappingIndexAt(int x, int y) const;
+    int tilesetIndexOfMapping(int mapping) const;   // -1 if invalid
+    int imageIndexOfMapping(int mapping) const;     // -1 if invalid
+    QString tilesetNameOfMapping(int mapping) const; // "" if invalid
+    // First mapping with this (tileset, image), or -1.
+    int findMapping(int tilesetIdx, int imageIdx) const;
 
-    // Low-level writes (no undo recording). Emit tileChanged. Used by commands.
-    void setMappingIndexAt(int x, int y, unsigned mappingIndex);
-    void setCellTypeAt(int x, int y, OP2Utility::CellType ct);
+    // Low-level writes, no undo (commands and bulk initialisers use these).
+    // Changed tiles are accumulated and announced by flushChanges().
+    void setMappingIndexAt(int x, int y, int mapping);
+    void setCellTypeAt(int x, int y, int cellType);
+    void flushChanges();
 
-    // Auto-insert variant: finds-or-inserts a TileMapping for (tilesetIdx, imageIdx),
-    // sets the tile to point at it, emits tileChanged. Returns true if anything
-    // changed. Used by PaintTileCommand on redo.
-    bool applyPaintTileGraphic(int x, int y, int tilesetIdx, int imageIdx);
-
-    // Pre-flight checks: true if the corresponding push* call would actually
-    // change the map (in bounds, not the protected bottom row, value differs).
-    // MapView uses these to open its stroke macro lazily — a QUndoStack macro
-    // that ends up empty still lands on the stack as a visible no-op undo
-    // entry AND flips the clean flag (spurious "unsaved changes"), so the
-    // macro must not be opened until a real command is guaranteed to follow.
-    bool wouldPaintTileChange(int x, int y, int tilesetIdx, int imageIdx) const;
-    bool wouldPaintCellTypeChange(int x, int y, OP2Utility::CellType ct) const;
-
-    // Push undoable commands onto the stack. No-ops if nothing would change
-    // (same predicate as the would*Change queries above).
-    void pushPaintTile(int x, int y, int tilesetIdx, int imageIdx);
-    void pushPaintCellType(int x, int y, OP2Utility::CellType ct);
-
-    // Places the clipboard's tiles + cell types with their top-left at (x0, y0).
-    // The whole placement is one undoable command. Clipped to map bounds.
-    void pushPlaceTiles(int x0, int y0, const TileClipboard &clip);
+    // Undoable editing.
+    void execute(MapCommand *cmd);
+    void beginStroke(const QString &description = QString());
+    void endStroke();
+    bool strokeOpen() const { return m_strokeOpen; }
+    void undo();
+    void redo();
+    QString undoText() const;
+    QString redoText() const;
+    bool canUndo() const;
+    bool canRedo() const;
 
     // Persistence
     bool save(const QString &path, QString &errorOut);
     QString currentPath() const { return m_currentPath; }
-    bool isDirty() const;
     void setCurrentPath(const QString &path) { m_currentPath = path; }
+    bool isDirty() const;
+    void markSavePoint();
+    void markNewUnsaved();
+
+    // .map file helpers through QFile (Unicode paths). The safe writer
+    // serialises in memory, verifies a read-back, and replaces the target
+    // atomically. Both throw std::exception on failure.
+    static OP2Utility::Map readMapFile(const QString &path);
+    static void writeMapFileSafely(const OP2Utility::Map &map, const QString &path);
+
+    // OP2Mapper3's tileset folder search under the OP2 folder; empty if none.
+    static QString resolveTilesetDir(const QString &op2Folder);
+    static QStringList tilesetSubfolders();
 
 signals:
-    // (x, y) in 0-based tile coords. Emitted whenever the tile's mapping
-    // index or cell type changes. Listeners: MapScene (invalidate),
-    // MainWindow (title bar refresh), etc.
-    void tileChanged(int x, int y);
-
-    // Mirrors QUndoStack::cleanChanged inverted — emitted as a convenience
-    // so views can update window-title dirty markers without reaching into
-    // the stack themselves.
+    // Tiles whose mapping or cell type changed (tile coords, inclusive rect).
+    void regionChanged(const QRect &tiles);
+    // After every execute / undo / redo (for debounced refreshes).
+    void edited();
     void dirtyChanged(bool dirty);
+    void undoRedoChanged();
+    void documentReplaced();
 
 private:
+    void noteChanged(int x, int y);
+    void emitDirtyIfChanged();
+
     std::unique_ptr<OP2Utility::ResourceManager> m_resources;
     std::unique_ptr<OP2Utility::Map> m_map;
     std::unique_ptr<TileImageCache> m_cache;
     QUndoStack *m_undoStack = nullptr;
     QString m_currentPath;
+
+    bool m_strokeOpen = false;
+    QString m_strokeDescription;
+    std::vector<MapCommand *> m_stroke; // owned until pushed
+    QRect m_pending;
+    bool m_lastDirty = false;
+};
+
+// ---- Commands (descriptions match OP2Mapper3) --------------------------------
+
+class ChangeTileMappingCommand : public MapCommand
+{
+public:
+    ChangeTileMappingCommand(MapDocument *doc, int x, int y, int oldMapping, int newMapping);
+    void apply() override;
+    void revert() override;
+    int x() const { return m_x; }
+    int y() const { return m_y; }
+private:
+    int m_x, m_y, m_old, m_new;
+};
+
+class ChangeCellTypeCommand : public MapCommand
+{
+public:
+    ChangeCellTypeCommand(MapDocument *doc, int x, int y, int oldType, int newType);
+    void apply() override;
+    void revert() override;
+private:
+    int m_x, m_y, m_old, m_new;
+};
+
+// Raw mapping indices (+ optional cell types) for a w*h block at (x0, y0),
+// row-major. Old values are snapshotted at construction. Cell types are
+// never written to the map's bottom row.
+class PasteTilesCommand : public MapCommand
+{
+public:
+    PasteTilesCommand(MapDocument *doc, int x0, int y0, int w, int h,
+                      std::vector<int> mappings, std::vector<int> cellTypes);
+    void apply() override;
+    void revert() override;
+private:
+    int m_x0, m_y0, m_w, m_h;
+    std::vector<int> m_new, m_newCells, m_old, m_oldCells;
+};
+
+class PlaceTileGroupCommand : public MapCommand
+{
+public:
+    PlaceTileGroupCommand(MapDocument *doc, int x0, int y0, int w, int h,
+                          std::vector<int> mappings, const QString &name);
+    void apply() override;
+    void revert() override;
+private:
+    int m_x0, m_y0, m_w, m_h;
+    std::vector<int> m_new, m_old;
+};
+
+class CompositeCommand : public MapCommand
+{
+public:
+    CompositeCommand(MapDocument *doc, std::vector<MapCommand *> commands, const QString &text);
+    ~CompositeCommand() override;
+    void apply() override;
+    void revert() override;
+private:
+    std::vector<MapCommand *> m_commands;
+};
+
+// Terrain brush / cliff / clean-up: mapping + cell type per tile.
+class TileChangesCommand : public MapCommand
+{
+public:
+    TileChangesCommand(MapDocument *doc, std::vector<TileChange> changes, const QString &text);
+    void apply() override;
+    void revert() override;
+private:
+    std::vector<TileChange> m_changes;
+};
+
+// Find & Fix Enclosed Areas: cell types only.
+struct CellTypeChange { int x, y, oldType, newType; };
+class ChangeCellTypesBulkCommand : public MapCommand
+{
+public:
+    ChangeCellTypesBulkCommand(MapDocument *doc, std::vector<CellTypeChange> changes, const QString &text);
+    void apply() override;
+    void revert() override;
+private:
+    std::vector<CellTypeChange> m_changes;
 };

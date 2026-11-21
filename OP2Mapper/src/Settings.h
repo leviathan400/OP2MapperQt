@@ -3,30 +3,49 @@
 #include <QString>
 #include <QStringList>
 
-// Thin typed facade over QSettings (org "OutpostUniverse", app "OP2Mapper",
-// set in main.cpp). Each accessor reads/writes one key; getters with
-// computed defaults (tileGroupsPath, workingPath) resolve the fallback at
-// call time, so a value is only persisted once the user explicitly sets it.
-// Tool-palette window geometry is NOT here — each palette saves its own
-// QSettings key (e.g. "TilesetWindow/geometry") in its closeEvent.
+// Typed settings stored in Mapper3.ini next to the exe (see IniFile.h),
+// with the same sections and keys as OP2Mapper3:
+//   [Paths]  OP2Path, WorkingPath, Tilegroups
+//   [Window] RecentFile1..5, PasteCellTypes, ToolWindowsAlwaysOnTop,
+//            AlwaysOnTop_<palette class>, palette/main-window positions,
+//            TileSelect*, Terrain* and AllowEditLastRow.
 namespace Settings {
-    QString op2Folder();
-    void setOp2Folder(const QString &path);
-    QString lastMapDir();
-    void setLastMapDir(const QString &path);
 
-    // Tile groups root folder. Default: <app dir>/Tilegroups.
-    // Exports go to <tileGroupsPath>/Exported/.
-    QString tileGroupsPath();
-    void setTileGroupsPath(const QString &path);
+// One-time move of the old Qt-port registry settings into Mapper3.ini.
+void migrateLegacySettings();
 
-    // Working directory (defaults to lastMapDir or app dir).
-    QString workingPath();
-    void setWorkingPath(const QString &path);
+QString op2Path();
+void setOp2Path(const QString &path);
+QString workingPath();
+void setWorkingPath(const QString &path);
+QString tileGroupsPath();
+void setTileGroupsPath(const QString &path);
 
-    // Recent file list (most-recent-first, capped to 5). Stored as a
-    // newline-joined string in QSettings.
-    QStringList recentFiles();
-    void addRecentFile(const QString &path);
-    void removeRecentFile(const QString &path);
-}
+// <exe dir>/Tilegroups
+QString defaultTileGroupsPath();
+
+// Recent files: most recent first, max 5, non-existent entries dropped on read.
+QStringList recentFiles();
+void addRecentFile(const QString &path);
+void removeRecentFile(const QString &path);
+
+bool pasteCellTypes();
+void setPasteCellTypes(bool on);
+
+// Hidden power-user override (VB My.Settings.AllowEditLastRow), default false.
+bool allowEditLastRow();
+
+// Generic [Window] access for palettes.
+QString windowValue(const QString &key, const QString &defaultValue = QString());
+void setWindowValue(const QString &key, const QString &value);
+bool windowBool(const QString &key, bool defaultValue);
+void setWindowBool(const QString &key, bool v);
+int windowInt(const QString &key, int defaultValue);
+void setWindowInt(const QString &key, int v);
+bool hasWindowValue(const QString &key);
+
+// A valid OP2 1.4.1 install: folder exists, Outpost2.exe in it and
+// OPU/OPULauncher.exe below it.
+bool isValidOp2Folder(const QString &path);
+
+} // namespace Settings

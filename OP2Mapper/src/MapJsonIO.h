@@ -4,6 +4,7 @@
 #include <QStringList>
 
 class MapDocument;
+struct MapLoadInfo;
 
 // Full-map JSON I/O. Port of OP2MapJsonTools (.NET shared library).
 //
@@ -42,7 +43,7 @@ bool exportToJson(const MapDocument &doc,
 bool importFromJson(const QString &jsonPath,
                     MapDocument &doc,
                     const QString &op2Folder,
-                    QStringList &missingTilesets,
-                    QString &errorOut);
+                    MapLoadInfo &info,
+                    QString &errorOut); // on success errorOut may hold a warning
 
 } // namespace MapJsonIO
