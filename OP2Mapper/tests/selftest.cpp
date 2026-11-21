@@ -3,6 +3,9 @@
 // automatically, and writes rendered images for visual inspection.
 //
 //   QT_QPA_PLATFORM=offscreen op2mapper_selftest <op2 folder> <map file> <out dir>
+//
+// Set QT_QPA_FONTDIR (e.g. C:/Windows/Fonts) so text renders offscreen.
+// The test writes the Outpost 2 folder into Mapper3.ini next to the exe.
 
 #include "Editor.h"
 #include "MainWindow.h"
@@ -15,6 +18,7 @@
 #include "MapRenderer.h"
 #include "MapView.h"
 #include "Op2Lib.h"
+#include "Settings.h"
 #include "TileGroupIO.h"
 #include "TileImageCache.h"
 
@@ -85,6 +89,12 @@ int main(int argc, char **argv)
     const QString out = QString::fromLocal8Bit(argv[3]);
     QDir().mkpath(out);
     startAutoAnswer();
+
+    // The main-window phase reads Mapper3.ini next to this exe; give it the
+    // Outpost 2 folder so it doesn't stop at the first-run Settings dialog.
+    Settings::setOp2Path(op2);
+    if (Settings::workingPath().isEmpty())
+        Settings::setWorkingPath(out);
 
     MapDocument doc;
     QWidget parent;

@@ -1,3 +1,5 @@
+// AppLog: OP2Mapper.log next to the exe.
+
 #include "AppLog.h"
 
 #include "AppInfo.h"
@@ -24,6 +26,7 @@ QString logPath(const char *name)
 
 namespace AppLog {
 
+// Line breaks in a message become " | ", so every entry is one line.
 void write(const QString &category, const QString &message)
 {
     QString msg = message;
@@ -50,6 +53,7 @@ void write(const QString &category, const QString &message)
     f.write((line + QStringLiteral("\r\n")).toUtf8());
 }
 
+// First line of a session: version, Qt, bitness, Windows version, folder, arguments.
 void writeStartup(const QStringList &arguments)
 {
     const QString args = arguments.isEmpty() ? QStringLiteral("(none)")

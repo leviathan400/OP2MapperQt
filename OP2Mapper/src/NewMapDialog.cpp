@@ -1,3 +1,5 @@
+// NewMapDialog: File > New Map.
+
 #include "NewMapDialog.h"
 
 #include "BlankMaps.h"
@@ -97,6 +99,7 @@ NewMapDialog::NewMapDialog(CreateFn create, QWidget *parent)
     m_mapName->setFocus();
 }
 
+// Template problems are reported as soon as the dialog opens, not only on OK.
 void NewMapDialog::reportTemplateProblems()
 {
     QString err;
@@ -107,6 +110,8 @@ void NewMapDialog::reportTemplateProblems()
     }
 }
 
+// OP2Mapper3's rule: name with spaces turned into underscores, invalid
+// characters removed, then "_WxH.map". Runs whenever the name or size changes.
 void NewMapDialog::regenerateFileName()
 {
     QString name = m_mapName->text().trimmed();
@@ -123,6 +128,7 @@ void NewMapDialog::regenerateFileName()
     m_fileName->setText(clean);
 }
 
+// The selected biome panel gets a sunken 3 px frame.
 void NewMapDialog::selectBiome(int index)
 {
     m_biome = index;
@@ -132,6 +138,7 @@ void NewMapDialog::selectBiome(int index)
     }
 }
 
+// Clicking a biome picture or its caption selects it.
 bool NewMapDialog::eventFilter(QObject *watched, QEvent *event)
 {
     if (event->type() == QEvent::MouseButtonPress) {
@@ -145,6 +152,8 @@ bool NewMapDialog::eventFilter(QObject *watched, QEvent *event)
     return QDialog::eventFilter(watched, event);
 }
 
+// Validates the fields ("Missing Information"), then hands the result to the
+// create callback; the dialog stays open if that fails.
 void NewMapDialog::onOk()
 {
     const QString title = tr("Missing Information");

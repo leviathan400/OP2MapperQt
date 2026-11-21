@@ -1,3 +1,5 @@
+// TileGroupsWindow: the Tile Groups palette.
+
 #include "TileGroupsWindow.h"
 
 #include "Editor.h"
@@ -22,6 +24,7 @@ const char *kDefaultFolder = "(Default)";
 const char *kNoGroups = "No Tile Groups Found";
 } // namespace
 
+// Preview surface: the group rendered against the current map, or a hint when there is nothing to show.
 class TileGroupsPreview : public QWidget
 {
 public:
@@ -143,6 +146,7 @@ void TileGroupsWindow::resetLabels()
     m_pathLabel->clear();
 }
 
+// After an export the "Exported" folder is selected and rescanned, even if it was already selected.
 void TileGroupsWindow::refreshFromDisk(const QString &selectFolder)
 {
     loadFolders();
@@ -159,6 +163,7 @@ void TileGroupsWindow::refreshFromDisk(const QString &selectFolder)
     }
 }
 
+// "(Default)" (loose .json files in the root) comes first, then the subfolders.
 void TileGroupsWindow::loadFolders()
 {
     m_root = Settings::tileGroupsPath();
@@ -192,6 +197,7 @@ void TileGroupsWindow::loadFolders()
     m_preview->refit();
 }
 
+// A folder without groups shows a "No Tile Groups Found" placeholder item.
 void TileGroupsWindow::onFolderChanged()
 {
     resetLabels();
@@ -221,6 +227,9 @@ void TileGroupsWindow::onFolderChanged()
     onGroupChanged();
 }
 
+// Loads and validates the group. An invalid file is reported and clears the
+// loaded group (which also ends placement mode); missing optional header
+// fields show as N/A.
 void TileGroupsWindow::onGroupChanged()
 {
     const QString file = m_groupCombo->currentText();
@@ -264,6 +273,7 @@ void TileGroupsWindow::onGroupChanged()
     renderPreview();
 }
 
+// Drawn from the mapping indices against the open map (not from the .bmp), at 32 px per tile.
 void TileGroupsWindow::renderPreview()
 {
     m_previewImage = QImage();

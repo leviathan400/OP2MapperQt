@@ -1,3 +1,5 @@
+// MiniMap: the Mini Map palette.
+
 #include "MiniMap.h"
 
 #include "Editor.h"
@@ -22,12 +24,14 @@ MiniMap::MiniMap(Editor *editor, QWidget *mainWindow)
     connect(&m_refreshTimer, &QTimer::timeout, this, &MiniMap::refreshThumbnail);
 }
 
+// Called after every edit, undo and redo; re-renders 300 ms after the last one.
 void MiniMap::scheduleRefresh()
 {
     if (isVisible())
         m_refreshTimer.start();
 }
 
+// Close Map: blank, but the window stays as it is.
 void MiniMap::clearThumbnail()
 {
     m_thumb = QImage();
@@ -35,6 +39,9 @@ void MiniMap::clearThumbnail()
     update();
 }
 
+// Renders the real GameMap at the smallest whole number of pixels per tile
+// that is at least the display scale (no seams), then shows it scaled down
+// and letterboxed in the window.
 void MiniMap::refreshThumbnail()
 {
     const MapDocument *doc = m_editor->document();
@@ -61,6 +68,8 @@ void MiniMap::setViewportTiles(const QRectF &visibleTiles)
     update();
 }
 
+// The yellow box is the main view's visible area, clipped to the map and
+// rounded outwards to whole thumbnail pixels.
 void MiniMap::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
@@ -92,6 +101,7 @@ void MiniMap::paintEvent(QPaintEvent *)
     p.drawRect(rx, ry, rw, rh);
 }
 
+// The tile under the click (clamped to the map) is centred in the main view.
 void MiniMap::jumpTo(const QPoint &pos)
 {
     const MapDocument *doc = m_editor->document();

@@ -1,3 +1,7 @@
+// ToolPalette: shared behaviour of the six tool windows (OP2Mapper3
+// ToolPalette.vb): position persistence, smart default layout, snapping and
+// the always-on-top title-bar menu.
+
 #include "ToolPalette.h"
 
 #include "Settings.h"
@@ -23,6 +27,9 @@ namespace {
 QList<ToolPalette *> g_palettes;
 constexpr int kSnap = 20;
 
+// A saved position is usable if the 30 px title-bar strip touches some
+// screen, so a window last shown on a disconnected monitor gets the default
+// layout instead of opening off-screen.
 bool titleStripOnScreen(const QRect &frame)
 {
     const QRect strip(frame.left(), frame.top(), frame.width(), 30);
@@ -39,6 +46,9 @@ int overlapArea(const QRect &a, const QRect &b)
     return i.isEmpty() ? 0 : i.width() * i.height();
 }
 
+// OP2Mapper3 FindFreeSpot: try positions against the work area's right edge
+// and the edges of windows already placed; pick the least overlap, then the
+// right-most, then the top-most. Fills columns from the right edge.
 QRect findFreeSpot(const QRect &wa, const QSize &size, const QList<QRect> &placed)
 {
     QList<int> xs{ wa.right() + 1 - size.width() };
@@ -68,6 +78,8 @@ QRect findFreeSpot(const QRect &wa, const QSize &size, const QList<QRect> &place
 }
 } // namespace
 
+// A Qt::Tool window without a close button. Stay-on-top comes from
+// AlwaysOnTop_<class>, defaulting to ToolWindowsAlwaysOnTop.
 ToolPalette::ToolPalette(const QString &key, const QString &className, QWidget *mainWindow)
     : QWidget(mainWindow, Qt::Tool | Qt::CustomizeWindowHint | Qt::WindowTitleHint)
     , m_key(key), m_className(className)
@@ -99,6 +111,7 @@ bool ToolPalette::allToolWindowsAlwaysOnTop()
     return Settings::windowBool(QStringLiteral("ToolWindowsAlwaysOnTop"), true);
 }
 
+// Sets every palette (open or not) and the global key, and syncs View > Tool Windows Always On Top.
 void ToolPalette::setAllAlwaysOnTop(bool on)
 {
     Settings::setWindowBool(QStringLiteral("ToolWindowsAlwaysOnTop"), on);
@@ -111,6 +124,7 @@ void ToolPalette::setAllAlwaysOnTop(bool on)
         emit n->allAlwaysOnTopChanged(on);
 }
 
+// Changing window flags hides the window, so it is shown again in place.
 void ToolPalette::setAlwaysOnTop(bool on, bool persist)
 {
     m_alwaysOnTop = on;
@@ -159,6 +173,7 @@ void ToolPalette::savePosition()
     Settings::setWindowInt(m_key + QStringLiteral("Height"), f.height());
 }
 
+// Saved shortly after a move ends, and again when the palette hides.
 void ToolPalette::moveEvent(QMoveEvent *event)
 {
     QWidget::moveEvent(event);
@@ -174,6 +189,7 @@ void ToolPalette::hideEvent(QHideEvent *event)
     QWidget::hideEvent(event);
 }
 
+// The title-bar menu: the two always-on-top items, then the palette's own extras (Tile Selection adds size, zoom and cell types).
 void ToolPalette::showTitleMenu(const QPoint &globalPos)
 {
     QMenu menu(this);
@@ -227,6 +243,12 @@ QRect visibleRect(HWND hwnd)
 }
 } // namespace
 
+// Windows only:
+//   WM_MOVING        snap the visible frame (DWM bounds, so the invisible resize
+//                    borders don't leave gaps) to screen work areas and other
+//                    palettes within 20 px; holding Ctrl moves freely
+//   WM_NCRBUTTONUP   right-click on the caption opens the title-bar menu
+//   Alt+Space        opens it at the window's top-left
 bool ToolPalette::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
 {
     Q_UNUSED(eventType);
@@ -313,6 +335,11 @@ bool ToolPalette::nativeEvent(const QByteArray &eventType, void *message, qintpt
 }
 #endif
 
+// OP2Mapper3 ArrangeToolWindowsSmart. Palettes with a usable saved position
+// keep it. The rest go on the largest other monitor if there is one. On a
+// work area at least 1700 px wide they take a fixed cluster at the top-right
+// when it doesn't overlap anything; everything else is packed with
+// findFreeSpot, tall windows first. New positions are saved.
 void ToolPalette::arrange(QWidget *mainWindow, const QList<ToolPalette *> &list, bool onlyUnplaced)
 {
     QList<ToolPalette *> kept;

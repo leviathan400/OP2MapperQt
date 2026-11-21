@@ -1,3 +1,7 @@
+// MapView: the map panel. Holds the zoom and the pixel offset of the map
+// origin, paints the map plus every overlay in OP2Mapper3's order, and turns
+// mouse input into Editor calls (left button) or panning (right button).
+
 #include "MapView.h"
 
 #include "Editor.h"
@@ -46,11 +50,13 @@ MapView::MapView(Editor *editor, QWidget *parent)
     connect(m_editor, &Editor::cursorChanged, this, &MapView::updateCursor);
 }
 
+// Tiles are drawn at a whole number of pixels, so zoomed views never show seams.
 int MapView::tilePx() const
 {
     return std::max(1, static_cast<int>(std::lround(T * m_zoom)));
 }
 
+// New or closed map: back to 100% at the top-left.
 void MapView::documentReplaced()
 {
     m_zoom = 1.0;
@@ -66,6 +72,7 @@ void MapView::documentReplaced()
     update();
 }
 
+// View > Enable Zoom (Ctrl+E). Turning it off snaps back to 100%.
 void MapView::setZoomEnabled(bool on)
 {
     m_zoomEnabled = on;
@@ -79,6 +86,7 @@ void MapView::setZoomEnabled(bool on)
     emit zoomChanged(m_zoom);
 }
 
+// Ctrl+R / Reset Zoom: 100%, a small map centred, a large one at the top-left.
 void MapView::resetView()
 {
     if (!m_doc->isLoaded())
@@ -95,6 +103,8 @@ void MapView::resetView()
     update();
 }
 
+// OP2Mapper3 ClampOffsets: a map smaller than the panel stays fully visible;
+// a larger one may be panned at most 64 px past each edge.
 void MapView::clampOffsets()
 {
     if (!m_doc->isLoaded())
@@ -112,6 +122,7 @@ void MapView::clampOffsets()
         m_offsetY = std::clamp(m_offsetY, height() - scaledH - kPanMargin, kPanMargin);
 }
 
+// Mini map click: centre the clicked tile.
 void MapView::panToCenterTile(int tx, int ty)
 {
     if (!m_doc->isLoaded())
@@ -124,6 +135,7 @@ void MapView::panToCenterTile(int tx, int ty)
     update();
 }
 
+// Visible area in fractional tiles (the mini map's yellow box).
 QRectF MapView::visibleTileRect() const
 {
     const double s = tilePx();
@@ -143,6 +155,7 @@ QRect MapView::tileScreenRect(const QRect &tiles) const
     return QRect(m_offsetX + tiles.x() * s, m_offsetY + tiles.y() * s, tiles.width() * s, tiles.height() * s);
 }
 
+// Changes the zoom keeping the map point under `anchor` (the cursor) fixed.
 void MapView::setZoomAround(double newZoom, const QPointF &anchor)
 {
     if (!m_doc->isLoaded())
@@ -163,6 +176,9 @@ void MapView::setZoomAround(double newZoom, const QPointF &anchor)
 
 // ---- Cache -------------------------------------------------------------------
 
+// When zoomed out, the whole map's mode layer is kept as one image so panning
+// is just a blit; edits update it tile by tile. At 50% and above (or when the
+// image would be huge) the visible tiles are drawn directly instead.
 void MapView::rebuildCache()
 {
     if (!m_doc->isLoaded()) {
@@ -194,6 +210,7 @@ void MapView::rebuildCache()
                            s, QPoint(0, 0), mode);
 }
 
+// Redraws edited tiles into the cached image.
 void MapView::updateCacheRegion(const QRect &tiles)
 {
     if (m_cache.isNull())
@@ -214,6 +231,8 @@ void MapView::onRegionChanged(const QRect &tiles)
 
 // ---- Paint -------------------------------------------------------------------
 
+// Black background, the mode layer (cached or direct), grid / large grid /
+// coordinates, then the editing overlays.
 void MapView::paintEvent(QPaintEvent *event)
 {
     QPainter p(this);
@@ -243,6 +262,10 @@ void MapView::paintEvent(QPaintEvent *event)
     paintOverlays(p, tiles);
 }
 
+// Overlays in OP2Mapper3's order and colours: enclosed areas (magenta), paste
+// preview, tile-group preview, copy rectangle (lime while selecting, sky blue
+// once copied, with its size label), brush outline, cliff preview, and the
+// white box on the selected tile.
 void MapView::paintOverlays(QPainter &p, const QRect &visibleTiles)
 {
     const int s = tilePx();
@@ -371,6 +394,7 @@ void MapView::updateCursor()
         unsetCursor();
 }
 
+// Left button goes to the Editor; right button starts a pan.
 void MapView::mousePressEvent(QMouseEvent *event)
 {
     setFocus();
@@ -389,6 +413,7 @@ void MapView::mousePressEvent(QMouseEvent *event)
     }
 }
 
+// Hover coordinates, editor tracking (also off the map, for the copy corner), and panning.
 void MapView::mouseMoveEvent(QMouseEvent *event)
 {
     if (!m_doc->isLoaded())
@@ -411,6 +436,7 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
     m_lastMouse = pos;
 }
 
+// A right click that moved less than 5 px opens the context menu; a longer drag was a pan.
 void MapView::mouseReleaseEvent(QMouseEvent *event)
 {
     const QPoint pos = event->position().toPoint();
@@ -428,6 +454,9 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
     }
 }
 
+// Ctrl+wheel with the terrain brush resizes the brush. Otherwise the wheel
+// steps the zoom through 10/25/50/75/100/125/150% around the cursor (no
+// scrolling), unless zoom is locked.
 void MapView::wheelEvent(QWheelEvent *event)
 {
     event->accept();
@@ -462,6 +491,7 @@ void MapView::wheelEvent(QWheelEvent *event)
     setZoomAround(kZoomSteps[idx], event->position());
 }
 
+// Keeps a small map centred and stops a large one showing empty space.
 void MapView::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
@@ -488,6 +518,7 @@ void MapView::dragEnterEvent(QDragEnterEvent *event)
         event->acceptProposedAction();
 }
 
+// Dropped files are handed to MainWindow, which opens the first one.
 void MapView::dropEvent(QDropEvent *event)
 {
     QStringList paths;

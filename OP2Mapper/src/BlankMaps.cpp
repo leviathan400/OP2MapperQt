@@ -1,3 +1,5 @@
+// BlankMaps: extraction of the embedded blank .map templates used by File > New Map.
+
 #include "BlankMaps.h"
 
 #include <QCoreApplication>
@@ -20,6 +22,7 @@ const QVector<BlankMaps::Size> kSizes = {
 
 QString fileName(int w, int h) { return QStringLiteral("blank_%1x%2.map").arg(w).arg(h); }
 
+// True if a file can be created in `dir` (decides between the exe folder and LOCALAPPDATA).
 bool dirWritable(const QString &dir)
 {
     QTemporaryFile probe(QDir(dir).filePath(QStringLiteral("probe_XXXXXX.tmp")));
@@ -32,6 +35,8 @@ namespace BlankMaps {
 
 QVector<Size> availableSizes() { return kSizes; }
 
+// <exe>/BlankMaps if it already has templates or the exe folder is writable,
+// otherwise %LOCALAPPDATA%/OP2Mapper/BlankMaps (e.g. under Program Files).
 QString folder()
 {
     static QString cached;
@@ -49,6 +54,9 @@ QString folder()
     return cached;
 }
 
+// Writes every template that is missing or has the wrong size, through a
+// .tmp file and a rename, so a truncated template is repaired. On Windows the
+// folder is marked hidden when something was written, as OP2Mapper3 does.
 bool ensureExtracted(QString &error)
 {
     const QString dir = folder();
@@ -98,6 +106,7 @@ bool ensureExtracted(QString &error)
     return true;
 }
 
+// Extracts on demand if the file isn't there yet.
 QString pathFor(int width, int height)
 {
     bool match = false;

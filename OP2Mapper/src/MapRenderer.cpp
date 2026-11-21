@@ -1,3 +1,7 @@
+// MapRenderer: OP2Mapper3's five render modes, grids and coordinate labels,
+// drawn at an integer tile size. Used by the map view, mini map, exports and
+// the overview image.
+
 #include "MapRenderer.h"
 
 #include "CellTypeInfo.h"
@@ -77,6 +81,7 @@ const QPixmap &enumLabelPixmap(int cellType, int fontPx)
     return cache.insert(key, pm).value();
 }
 
+// Inclusive tile rect clipped to the map.
 QRect clipToMap(const MapDocument &doc, const QRect &tiles)
 {
     return tiles.intersected(QRect(0, 0, doc.widthTiles(), doc.heightTiles()));
@@ -237,6 +242,7 @@ void drawOverlays(QPainter &p, const MapDocument &doc, const QRect &tilesIn, int
     }
 }
 
+// The whole map as one image; returns a null image if it can't be allocated.
 QImage renderFullMap(const MapDocument &doc, int tilePx, int mode, const Overlays &o)
 {
     if (!doc.isLoaded() || tilePx <= 0)
@@ -265,6 +271,7 @@ QImage mappingImage(const MapDocument &doc, int mapping)
     return doc.cache()->tile(static_cast<std::size_t>(ts), static_cast<std::size_t>(img));
 }
 
+// Falls back to the placeholder tile when the graphic is missing.
 QImage rawTileImage(const MapDocument &doc, int x, int y)
 {
     QImage img = mappingImage(doc, doc.mappingIndexAt(x, y));

@@ -38,8 +38,12 @@ bool exportToJson(const MapDocument &doc,
 // graphics, cell types, clip rect, and tileset sources are overlaid; the
 // blank template's tileMappings/terrainTypes are kept.
 //
-// `op2Folder` is needed because loading the blank requires a ResourceManager.
-// `missingTilesets` reports any tileset names the destination map can't load.
+// The whole map is built in memory first, so a failed import leaves the
+// open map untouched. Tile values that aren't in the template's mapping
+// table and out-of-range cell types are skipped (those tiles keep the
+// template's values) and reported through errorOut as a warning while the
+// function still returns true. `op2Folder` locates the tilesets; `info`
+// receives the tileset loading results.
 bool importFromJson(const QString &jsonPath,
                     MapDocument &doc,
                     const QString &op2Folder,

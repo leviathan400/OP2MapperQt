@@ -1,3 +1,8 @@
+// MainWindow: OP2Mapper3's fMain shell. Builds the menus (File, Edit, View,
+// Render, Image, Help), the map panel + sidebar + status bar, and the six tool
+// palettes, and runs the file flows (open, save, close, new, recent, import /
+// export) and the image exports. Editing itself lives in Editor.
+
 #include "MainWindow.h"
 
 #include "AppInfo.h"
@@ -58,6 +63,7 @@ const QString kAppName = QString::fromLatin1(AppInfo::Name);
 
 enum GridMode { NoGrid = 0, SmallGrid, LargeGrid };
 
+// Writes through QSaveFile, so a failed export never destroys the previous image.
 bool saveJpegSafely(const QImage &img, const QString &path, int quality, QString &error)
 {
     QSaveFile f(path);
@@ -81,6 +87,8 @@ bool saveJpegSafely(const QImage &img, const QString &path, int quality, QString
 
 } // namespace
 
+// The palettes are created once and shown / hidden with Edit Mode (VB
+// creates and disposes them; keeping them avoids losing their state).
 MainWindow::MainWindow()
     : m_doc(std::make_unique<MapDocument>())
 {
@@ -126,6 +134,9 @@ MainWindow::~MainWindow() = default;
 
 // ---- Menus -------------------------------------------------------------------
 
+// Menu texts, order and shortcuts follow OP2Mapper3. JSON export / import are
+// extras the VB app doesn't have. Esc, Enter, Backspace and Ctrl+B are window
+// shortcuts handled before anything else, like VB ProcessCmdKey.
 void MainWindow::buildMenus()
 {
     // File
@@ -249,6 +260,7 @@ void MainWindow::buildMenus()
     });
 }
 
+// Three labels: map name (+ edit mode suffix), full path, hover coordinates.
 void MainWindow::buildStatusBar()
 {
     m_statusName = new QLabel;
@@ -259,6 +271,7 @@ void MainWindow::buildStatusBar()
     statusBar()->addPermanentWidget(m_statusCoords);
 }
 
+// Connects document, editor, view, sidebar and palettes.
 void MainWindow::wireSignals()
 {
     connect(m_doc.get(), &MapDocument::dirtyChanged, this, &MainWindow::updateTitle);
@@ -321,6 +334,7 @@ void MainWindow::wireSignals()
 
 // ---- Refresh -----------------------------------------------------------------
 
+// "OP2Mapper", or "[* ]OP2Mapper - <file.map>" with a leading "* " when unsaved.
 void MainWindow::updateTitle()
 {
     if (!m_doc->isLoaded() || m_doc->currentPath().isEmpty()) {
@@ -338,6 +352,7 @@ void MainWindow::updateStatus()
                               ? QDir::toNativeSeparators(m_doc->currentPath()) : tr("N/A"));
 }
 
+// Sidebar "Tile Under Cursor" for the selected tile (the left-clicked one, despite the name).
 void MainWindow::updateTileInfo()
 {
     const QPoint t = m_editor->currentTile();
@@ -357,6 +372,7 @@ void MainWindow::updateToolLabels()
     m_sidebar->setToolLabels(m_editor->toolLabels(), m_editor->editMode());
 }
 
+// Undo / Redo items show the command, e.g. "Undo Paste 4x3 Tiles".
 void MainWindow::updateUndoRedo()
 {
     const bool loaded = m_doc->isLoaded();
@@ -378,6 +394,7 @@ void MainWindow::updateZoomLabel()
         m_sidebar->setZoomText(tr("Zoom Level: %1%").arg(qRound(m_view->zoom() * 100)), false);
 }
 
+// Map-dependent menus; Copy needs edit mode, Paste also needs a copy.
 void MainWindow::updateMapActions()
 {
     const bool loaded = m_doc->isLoaded();
@@ -398,6 +415,7 @@ void MainWindow::syncViewChecks()
     m_coordsAct->setChecked(o.coords);
 }
 
+// Sidebar Map and Tilesets sections. A tileset with no loaded tiles is listed as "(not found)".
 void MainWindow::refreshSidebarMap()
 {
     if (!m_doc->isLoaded()) {
@@ -442,6 +460,9 @@ void MainWindow::toggleEditMode()
     m_editor->setEditMode(!m_editor->editMode());
 }
 
+// Edit Mode on: play beep9.wav from the game folder, refresh and show the
+// palettes, and lay out any palette without a usable saved position.
+// Off: save positions and hide them.
 void MainWindow::onEditModeChanged(bool on)
 {
     if (on) {
@@ -475,6 +496,7 @@ void MainWindow::onEditModeChanged(bool on)
 
 // ---- File flows --------------------------------------------------------------
 
+// Asks for the Outpost 2 folder through Settings if none is set.
 bool MainWindow::ensureOp2Folder()
 {
     const QString op2 = Settings::op2Path();
@@ -486,6 +508,7 @@ bool MainWindow::ensureOp2Folder()
     return !again.isEmpty() && QDir(again).exists();
 }
 
+// Unsaved-changes prompt. Yes saves (with the Save dialog); returns false if the user cancels or the save fails.
 bool MainWindow::confirmDiscardChanges()
 {
     if (!m_doc->isLoaded() || !m_doc->isDirty())
@@ -501,6 +524,7 @@ bool MainWindow::confirmDiscardChanges()
     return !m_doc->isDirty();
 }
 
+// OP2Mapper3's tileset warnings: folder not found (lists the folders searched), none loaded, or some missing.
 void MainWindow::showTilesetWarnings(const MapLoadInfo &info)
 {
     if (!info.tilesetDirFound) {
@@ -522,6 +546,9 @@ void MainWindow::showTilesetWarnings(const MapLoadInfo &info)
     }
 }
 
+// Shared load path (Open, Recent, drag-drop, command line, New Map). On
+// failure the open map, its history and the UI are untouched. Blank templates
+// are loaded with includeInRecent = false.
 bool MainWindow::loadMapFile(const QString &path, bool includeInRecent)
 {
     if (!ensureOp2Folder())
@@ -583,6 +610,8 @@ void MainWindow::openDroppedFiles(const QStringList &paths)
         QMessageBox::information(this, tr("Map Loaded"), tr("Map loaded successfully."));
 }
 
+// File > Save Map always shows the Save dialog, as in OP2Mapper3 (there is no
+// silent save). It starts at the current file, or WorkingPath for a new map.
 bool MainWindow::onSaveMap()
 {
     if (!m_doc->isLoaded())
@@ -610,6 +639,7 @@ bool MainWindow::onSaveMap()
     return true;
 }
 
+// Asks "Close the current map?" even when there are no unsaved changes, like VB.
 void MainWindow::onCloseMap()
 {
     if (!m_doc->isLoaded())
@@ -635,6 +665,7 @@ void MainWindow::onCloseMap()
     updateToolLabels();
 }
 
+// The dialog stays open if creating the map fails (createNewMap returns false).
 void MainWindow::onNewMap()
 {
     if (!confirmDiscardChanges())
@@ -647,6 +678,10 @@ void MainWindow::onNewMap()
     dlg.exec();
 }
 
+// Loads the blank template, fills the starting biome with random raw
+// mapping indices (written directly: it is the starting state, not an undo
+// step), makes the bottom row Impassible1, names the map in WorkingPath and
+// marks it unsaved, so closing it always asks.
 bool MainWindow::createNewMap(const NewMapDialog::Result &r)
 {
     if (!confirmDiscardChanges())
@@ -696,6 +731,7 @@ bool MainWindow::createNewMap(const NewMapDialog::Result &r)
     return true;
 }
 
+// "Recent Files": up to five, "N. file.map", the prompt runs before the missing-file check.
 void MainWindow::rebuildRecentMenu()
 {
     m_recentMenu->clear();
@@ -749,6 +785,7 @@ void MainWindow::onExportJson()
     QMessageBox::information(this, tr("Export to JSON"), tr("Map exported to:\n%1").arg(QDir::toNativeSeparators(out)));
 }
 
+// Import from JSON (Qt extra): the imported map is unsaved and named after the JSON file in WorkingPath.
 void MainWindow::onImportJson()
 {
     if (!confirmDiscardChanges() || !ensureOp2Folder())
@@ -784,6 +821,7 @@ void MainWindow::onImportJson()
 
 // ---- Images ------------------------------------------------------------------
 
+// Exports go next to the map, or to WorkingPath for a map that has no folder yet.
 QString MainWindow::exportFolder() const
 {
     const QString cur = m_doc->currentPath();
@@ -795,6 +833,9 @@ QString MainWindow::exportFolder() const
     return QCoreApplication::applicationDirPath();
 }
 
+// Image > Export Image: "<map>_<RenderMode>[_suffix].jpg" next to the map,
+// JPEG quality 95. Exports never show coordinates; only the grid the menu item
+// asks for is drawn. Over 16384 x 16384 px is refused.
 void MainWindow::exportImage(double scale, const QString &suffix, int gridMode)
 {
     if (!m_doc->isLoaded())
@@ -837,6 +878,8 @@ void MainWindow::exportImage(double scale, const QString &suffix, int gridMode)
         : tr("Map image exported successfully at %1% size to: %2").arg(qRound(scale * 100)).arg(shown));
 }
 
+// Image > Export Overview: the five render modes at 12.5% in a 3x2 grid with
+// an info panel, saved as "<map>_overview.jpg" and opened in the viewer.
 void MainWindow::exportOverview()
 {
     if (!m_doc->isLoaded()) {
@@ -928,6 +971,7 @@ void MainWindow::exportOverview()
     QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
+// F12: the map panel as shown, saved to WorkingPath (JPEG quality 90).
 void MainWindow::takeScreenshot()
 {
     if (!m_doc->isLoaded() || m_view->width() <= 0 || m_view->height() <= 0)
@@ -948,6 +992,7 @@ void MainWindow::takeScreenshot()
     QMessageBox::information(this, tr("Screenshot"), tr("Screenshot saved to:\n%1").arg(QDir::toNativeSeparators(path)));
 }
 
+// View > Configure Grid Size: large-grid step and coordinate spacing, 8..64 tiles (not saved).
 void MainWindow::configureGrid()
 {
     QDialog dlg(this);
@@ -981,6 +1026,9 @@ struct ParsedArgs {
     QString mapFile;
 };
 
+// Command line, as in OP2Mapper3: /op2dir, -op2dir, --op2dir, /op2dir:<dir>
+// and --op2dir=<dir> (quotes and trailing slashes stripped); the first other
+// argument is a map file to open.
 ParsedArgs parseArgs(const QStringList &args)
 {
     ParsedArgs out;
@@ -1021,6 +1069,8 @@ ParsedArgs parseArgs(const QStringList &args)
 }
 } // namespace
 
+// First run: without a valid Outpost 2 folder the user gets the Welcome box
+// and Settings; if still unset the app explains and exits (returns false).
 bool MainWindow::startup(const QStringList &args)
 {
     const ParsedArgs pa = parseArgs(args);
@@ -1060,6 +1110,7 @@ bool MainWindow::startup(const QStringList &args)
     return true;
 }
 
+// A second launch forwarded its arguments: bring this window forward and open its map.
 void MainWindow::handleSecondInstance(const QStringList &args)
 {
     AppLog::write(QStringLiteral("Start"),
@@ -1081,6 +1132,7 @@ void MainWindow::handleSecondInstance(const QStringList &args)
     loadMapFile(pa.mapFile, true);
 }
 
+// Unsaved-changes prompt, then save the main window and palette positions.
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     if (!confirmDiscardChanges()) {
@@ -1095,6 +1147,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     QApplication::quit();
 }
 
+// Main window bounds from Mapper3.ini, used only if at least 200x150 px of them is on some screen.
 void MainWindow::restoreMainPosition()
 {
     if (!Settings::hasWindowValue(QStringLiteral("MainLeft")) || !Settings::hasWindowValue(QStringLiteral("MainTop")))
@@ -1124,6 +1177,7 @@ void MainWindow::restoreMainPosition()
     m_positionRestored = true;
 }
 
+// Saves the normal (not maximized) bounds plus the state, after moves and resizes (debounced) and on close.
 void MainWindow::saveMainPosition()
 {
     if (!isVisible() || isMinimized())

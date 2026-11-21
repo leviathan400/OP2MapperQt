@@ -1,3 +1,5 @@
+// IniFile: OP2Mapper3-compatible reader / writer for Mapper3.ini.
+
 #include "IniFile.h"
 
 #include <QCoreApplication>
@@ -8,6 +10,7 @@
 
 namespace {
 
+// The whole file as lines (CR stripped); empty if it can't be read.
 QStringList readLines()
 {
     QFile f(IniFile::path());
@@ -37,6 +40,7 @@ bool isSection(const QString &line, QString *name = nullptr)
     return false;
 }
 
+// VB rule: the value is everything after the first "=", not trimmed and not unescaped.
 bool keyMatches(const QString &line, const QString &key, QString *valueOut)
 {
     const QString t = line.trimmed();
@@ -89,6 +93,8 @@ bool contains(const QString &section, const QString &key)
     return find(readLines(), section, key, nullptr);
 }
 
+// Replace the key in place, or add it at the end of its section, or append
+// the section. The file is rewritten with CRLF line ends.
 void setValue(const QString &section, const QString &key, const QString &value)
 {
     QStringList lines = readLines();
@@ -135,6 +141,7 @@ void setValue(const QString &section, const QString &key, const QString &value)
     f.write((lines.join(QStringLiteral("\r\n")) + QStringLiteral("\r\n")).toUtf8());
 }
 
+// "True" / "False" in any case, or a number (non-zero is true).
 bool boolValue(const QString &section, const QString &key, bool defaultValue)
 {
     const QString v = value(section, key).trimmed();

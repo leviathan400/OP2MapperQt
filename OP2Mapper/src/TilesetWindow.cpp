@@ -1,3 +1,5 @@
+// TilesetWindow: the Tile Set palette.
+
 #include "TilesetWindow.h"
 
 #include "Editor.h"
@@ -34,6 +36,7 @@ TilesetWindow::TilesetWindow(Editor *editor, QWidget *mainWindow)
     connect(m_editor, &Editor::tilesetSelectionCleared, this, &TilesetWindow::clearSelection);
 }
 
+// One combo entry per non-empty tileset source, mapped back to its source index (duplicate names stay distinct).
 void TilesetWindow::reloadFromDocument()
 {
     const QSignalBlocker block(m_combo);
@@ -73,6 +76,7 @@ void TilesetWindow::clearSelection()
     m_grid->setSelectedTile(-1);
 }
 
+// The highlight moves only if the Editor accepted the pick (not in copy mode or a cell-type-only view).
 void TilesetWindow::onTileClicked(int index)
 {
     if (m_currentTilesetIdx < 0)

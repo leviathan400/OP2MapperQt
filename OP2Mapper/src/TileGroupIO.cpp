@@ -1,3 +1,5 @@
+// TileGroupIO: tile-group .json (+ .bmp) files, compatible with OP2Mapper3 and OP2TileGroupTools.
+
 #include "TileGroupIO.h"
 
 #include "Editor.h"
@@ -19,6 +21,7 @@
 
 namespace {
 
+// Header fields are optional; non-string values are shown as text, like Newtonsoft's ToString.
 QString headerString(const QJsonObject &h, const char *key)
 {
     const QJsonValue v = h.value(QLatin1String(key));
@@ -31,6 +34,7 @@ QString headerString(const QJsonObject &h, const char *key)
     return QString();
 }
 
+// Accepts whole numbers (and numeric strings); anything else makes the group invalid.
 bool toInt(const QJsonValue &v, int &out)
 {
     if (v.isDouble()) {
@@ -118,6 +122,7 @@ bool load(const QString &jsonPath, TileGroupData &out, Header &header, QString &
     return true;
 }
 
+// Byte-for-byte OP2Mapper3 output; see JsonWriter.h for why it is written by hand.
 bool writeJson(const QString &path, int w, int h, const std::vector<int> &mappings,
                const QString &tilesetName, const QString &name, QString &error)
 {
@@ -157,6 +162,7 @@ bool writeJson(const QString &path, int w, int h, const std::vector<int> &mappin
     return true;
 }
 
+// Preview image beside the JSON: always 32 px tiles, whatever zoom the Tile Selection window uses.
 bool writeBmp(const QString &path, const MapDocument &doc, int w, int h,
               const std::vector<int> &mappings, QString &error)
 {

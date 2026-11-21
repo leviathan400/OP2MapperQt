@@ -1,3 +1,5 @@
+// Sidebar: the right-hand information panel of the main window.
+
 #include "Sidebar.h"
 
 #include "Editor.h"
@@ -27,6 +29,7 @@ void ElideLabel::setColor(const QColor &c)
     setPalette(pal);
 }
 
+// Elides to the label width; the tooltip shows the full text only when it was cut.
 void ElideLabel::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
@@ -169,6 +172,7 @@ void Sidebar::setMapInfo(const QString &fileName, int w, int h, int tileCount)
     m_tileCount->setFullText(tr("Tile Count: %1").arg(tileCount));
 }
 
+// The list grows to fit 1..20 rows (then scrolls), plus room for a horizontal scrollbar if needed.
 void Sidebar::setTilesets(const QStringList &rows, int missing)
 {
     m_tilesetList->clear();
@@ -189,6 +193,8 @@ void Sidebar::setTilesets(const QStringList &rows, int missing)
     m_tilesetList->setFixedHeight(h);
 }
 
+// Selected tile details plus a 32 px and a 3x preview. A missing graphic
+// shows OP2Mapper3's grey placeholder with a red X and the tileset / index.
 void Sidebar::setTileInfo(bool valid, const QString &coords, const QString &tileset, int imageIndex,
                           int mappingIndex, const QString &cellType, const QImage &tile,
                           const QString &missingTileset)
@@ -240,6 +246,7 @@ void Sidebar::setZoomText(const QString &text, bool locked)
     m_zoom->setStyleSheet(locked ? QStringLiteral("color: gray;") : QString());
 }
 
+// Disabled without a map; light blue "Disable Edit Mode" while editing.
 void Sidebar::setEditModeEnabled(bool enabled, bool on)
 {
     m_editMode->setEnabled(enabled);

@@ -1,3 +1,5 @@
+// Settings: typed access to Mapper3.ini.
+
 #include "Settings.h"
 
 #include "AppLog.h"
@@ -18,6 +20,7 @@ QString readPath(const QString &key)
     return IniFile::value(kPaths, key).trimmed();
 }
 
+// Trimmed, written only when changed, and logged like OP2Mapper3.
 void writePath(const QString &key, const QString &value)
 {
     const QString v = value.trimmed();
@@ -31,6 +34,8 @@ void writePath(const QString &key, const QString &value)
 
 namespace Settings {
 
+// Earlier Qt builds kept settings in the registry. Values are copied into
+// Mapper3.ini once, only for keys the INI doesn't have yet.
 void migrateLegacySettings()
 {
     // The Qt port used to keep its settings in the registry (QSettings,
@@ -74,6 +79,7 @@ QString defaultTileGroupsPath()
         QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("Tilegroups")));
 }
 
+// Files that no longer exist are dropped when the list is read.
 QStringList recentFiles()
 {
     QStringList list;
@@ -92,6 +98,7 @@ static void saveRecent(const QStringList &list)
                           i < list.size() ? list[i] : QString());
 }
 
+// Most recent first, duplicates removed case-insensitively, five at most.
 void addRecentFile(const QString &path)
 {
     const QString p = QDir::toNativeSeparators(path);
@@ -117,6 +124,7 @@ void removeRecentFile(const QString &path)
     saveRecent(list);
 }
 
+// Anything other than "False" counts as on (OP2Mapper3 rule).
 bool pasteCellTypes()
 {
     return IniFile::value(kWindow, QStringLiteral("PasteCellTypes"), QStringLiteral("True"))

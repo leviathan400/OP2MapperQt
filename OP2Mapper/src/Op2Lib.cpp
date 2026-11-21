@@ -1,3 +1,5 @@
+// Op2Lib: C++ wrapper over op2maplib's C API.
+
 #include "Op2Lib.h"
 
 #include "AppLog.h"
@@ -20,6 +22,8 @@ namespace Op2Lib {
 
 QString libraryVersion() { return QString::fromUtf8(om_version()); }
 
+// Loaded on first use. An op2maplib/op2.json next to the exe overrides the
+// embedded profile (handy for testing a new profile without rebuilding).
 const om_profile *profile()
 {
     if (g_tried)
@@ -66,6 +70,7 @@ void shutdown()
     g_profile = nullptr;
 }
 
+// Swatch and brush-outline colours per ground id, as in OP2Mapper3's Terrain Brush window.
 QColor groundColor(const QString &id)
 {
     if (id == QLatin1String("mud")) return QColor(150, 120, 85);
@@ -77,6 +82,7 @@ QColor groundColor(const QString &id)
     return QColor(128, 128, 128);
 }
 
+// Grounds with no fill tiles can't be painted, so they get no button.
 QVector<Ground> paintableGrounds()
 {
     QVector<Ground> out;
@@ -102,6 +108,9 @@ BlendMap::~BlendMap()
     om_blend_free(m_map);
 }
 
+// The library gets the map's mapping table (tileset file name + image per
+// entry) and every cell's mapping index, row by row. It never sees the .map
+// column-block layout. Its results only use indices already in the table.
 bool BlendMap::create(const MapDocument &doc, QString &error, bool &profileUnavailable)
 {
     om_blend_free(m_map);
@@ -149,6 +158,7 @@ bool BlendMap::create(const MapDocument &doc, QString &error, bool &profileUnava
     return true;
 }
 
+// xy holds (x, y) pairs. Returns the number of cells painted.
 int BlendMap::paint(int ground, const std::vector<int32_t> &xy)
 {
     return om_blend_paint(m_map, ground, xy.data(), static_cast<int32_t>(xy.size() / 2));
@@ -164,6 +174,7 @@ int BlendMap::drawCliff(const std::vector<int32_t> &xy, int highSide, double wal
 
 int BlendMap::lastCliffStage() const { return om_cliff_last_stage(m_map); }
 
+// Changes from the last resolve or cliff draw.
 std::vector<BlendMap::Change> BlendMap::changes(int count) const
 {
     std::vector<Change> out;
@@ -208,6 +219,8 @@ std::vector<TileChange> toTileChanges(const MapDocument &doc,
     return out;
 }
 
+// Passable regions with Outpost 2's rules (8-connected, bottom row skipped,
+// edges joined only on 512x256 world maps), largest first.
 bool findRegions(const MapDocument &doc, QVector<QVector<QPoint>> &regions, QString &error)
 {
     regions.clear();

@@ -1,3 +1,6 @@
+// MapDocument: the loaded map, its tileset graphics and the undo history,
+// plus the undoable commands. See MapDocument.h for the editing model.
+
 #include "MapDocument.h"
 
 #include "CellTypeInfo.h"
@@ -31,6 +34,8 @@ QString tr(const char *s) { return QCoreApplication::translate("MapDocument", s)
 
 // ---- MapCommand -------------------------------------------------------------
 
+// Commands are applied by MapDocument::execute() before they are pushed, so
+// QUndoStack's first redo() (on push) is skipped.
 void MapCommand::redo()
 {
     if (m_skipRedo) {
@@ -49,6 +54,7 @@ void MapCommand::undo()
 
 // ---- MapDocument ------------------------------------------------------------
 
+// The undo limit has to be set while the stack is empty.
 MapDocument::MapDocument(QObject *parent)
     : QObject(parent)
     , m_undoStack(new QUndoStack(this))
@@ -73,6 +79,7 @@ QStringList MapDocument::tilesetSubfolders()
              QStringLiteral("tilesets") };
 }
 
+// First existing of OPU/base/tilesets, base/tilesets and tilesets under the Outpost 2 folder.
 QString MapDocument::resolveTilesetDir(const QString &op2Folder)
 {
     if (op2Folder.trimmed().isEmpty())
@@ -144,6 +151,7 @@ bool MapDocument::loadMap(OP2Utility::Map &&mapIn, const QString &path, const QS
     }
 }
 
+// Close Map. The undo stack object stays, so menu actions bound to it never dangle.
 void MapDocument::reset()
 {
     for (MapCommand *c : m_stroke)
@@ -226,11 +234,13 @@ int MapDocument::findMapping(int tilesetIdx, int imageIdx) const
     return -1;
 }
 
+// Changed tiles are collected and announced once by flushChanges().
 void MapDocument::noteChanged(int x, int y)
 {
     m_pending = m_pending.isNull() ? QRect(x, y, 1, 1) : m_pending.united(QRect(x, y, 1, 1));
 }
 
+// Raw write, no undo. The tile field is 11 bits wide, so 0..2047.
 void MapDocument::setMappingIndexAt(int x, int y, int mapping)
 {
     if (!inBounds(x, y) || mapping < 0 || mapping >= 2048)
@@ -244,6 +254,7 @@ void MapDocument::setMappingIndexAt(int x, int y, int mapping)
     noteChanged(x, y);
 }
 
+// Raw write, no undo. Cell types are 0..31.
 void MapDocument::setCellTypeAt(int x, int y, int cellType)
 {
     if (!inBounds(x, y) || cellType < 0 || cellType >= CellTypeInfo::Count)
@@ -266,6 +277,9 @@ void MapDocument::flushChanges()
     emit regionChanged(r);
 }
 
+// Apply first, record after: a command that throws leaves the history and
+// the dirty state as they were. Inside a stroke the command waits in the
+// stroke list until endStroke().
 void MapDocument::execute(MapCommand *cmd)
 {
     if (!m_map) {
@@ -297,6 +311,7 @@ void MapDocument::beginStroke(const QString &description)
     m_strokeDescription = description;
 }
 
+// An empty stroke records nothing, one command is pushed as it is, more become one composite step.
 void MapDocument::endStroke()
 {
     if (!m_strokeOpen)
@@ -319,6 +334,7 @@ void MapDocument::endStroke()
     m_undoStack->push(top);
 }
 
+// Undo / redo in the middle of a drag commit the stroke first (as in VB).
 void MapDocument::undo()
 {
     endStroke();
@@ -342,6 +358,7 @@ QString MapDocument::redoText() const { return m_undoStack->redoText(); }
 bool MapDocument::canUndo() const { return m_undoStack->canUndo(); }
 bool MapDocument::canRedo() const { return m_undoStack->canRedo(); }
 
+// Unsaved = not at the save point, or an open stroke that already changed tiles.
 bool MapDocument::isDirty() const
 {
     if (!m_map)
@@ -365,6 +382,7 @@ void MapDocument::markSavePoint()
     emitDirtyIfChanged();
 }
 
+// New Map / JSON import: the clean state becomes unreachable, so even undoing everything still counts as unsaved.
 void MapDocument::markNewUnsaved()
 {
     m_undoStack->resetClean();
@@ -389,6 +407,7 @@ bool MapDocument::save(const QString &path, QString &errorOut)
     return true;
 }
 
+// Reads through QFile so non-ASCII paths work on Windows (OP2Utility's own file streams take a narrow path).
 OP2Utility::Map MapDocument::readMapFile(const QString &path)
 {
     QFile f(path);
@@ -402,6 +421,9 @@ OP2Utility::Map MapDocument::readMapFile(const QString &path)
     return OP2Utility::Map::ReadMap(reader);
 }
 
+// Serialise in memory, check the bytes read back as the same map, then write
+// through QSaveFile (temp file + atomic rename). A failed save never damages
+// the existing file.
 void MapDocument::writeMapFileSafely(const OP2Utility::Map &map, const QString &path)
 {
     OP2Utility::Stream::DynamicMemoryWriter writer;
@@ -473,6 +495,7 @@ PasteTilesCommand::PasteTilesCommand(MapDocument *doc, int x0, int y0, int w, in
                                : tr("Paste %1x%2 Tiles + Cell Types").arg(w).arg(h));
 }
 
+// The map's bottom row keeps its own cell type: it must stay impassable.
 void PasteTilesCommand::apply()
 {
     const int lastRow = m_doc->lastRow();
@@ -544,6 +567,7 @@ void CompositeCommand::apply()
         c->apply();
 }
 
+// Reverse order, so a tile painted twice in one stroke is restored correctly.
 void CompositeCommand::revert()
 {
     for (auto it = m_commands.rbegin(); it != m_commands.rend(); ++it)
@@ -565,6 +589,7 @@ void TileChangesCommand::apply()
     }
 }
 
+// Reverse order, like CompositeCommand.
 void TileChangesCommand::revert()
 {
     for (auto it = m_changes.rbegin(); it != m_changes.rend(); ++it) {

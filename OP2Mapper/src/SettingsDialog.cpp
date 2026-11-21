@@ -1,3 +1,5 @@
+// SettingsDialog (File > Settings) and the About dialog.
+
 #include "SettingsDialog.h"
 
 #include "AppInfo.h"
@@ -17,6 +19,7 @@
 #include <QUrl>
 
 namespace {
+// OP2Mapper3's 620x100 banner at the top of Settings and About.
 QLabel *banner(QWidget *parent)
 {
     auto *b = new QLabel(parent);
@@ -76,6 +79,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
 }
 
+// Keeps asking until a real Outpost 2 1.4.1 folder is chosen or the user cancels.
 void SettingsDialog::browseOp2()
 {
     QString start = m_op2->text().trimmed();
@@ -107,6 +111,7 @@ void SettingsDialog::browseFolder(QLineEdit *edit, const QString &title, const Q
         edit->setText(QDir::toNativeSeparators(dir));
 }
 
+// Empty is fine; a folder that doesn't exist is offered for creation.
 bool SettingsDialog::checkOptionalFolder(QLineEdit *edit, const QString &description)
 {
     const QString p = edit->text().trimmed();
@@ -127,6 +132,8 @@ bool SettingsDialog::checkOptionalFolder(QLineEdit *edit, const QString &descrip
     return true;
 }
 
+// The Outpost 2 folder must exist; one that doesn't look like an install
+// (no Outpost2.exe / OPU\OPULauncher.exe) needs confirming.
 void SettingsDialog::onSave()
 {
     const QString op2 = m_op2->text().trimmed();
@@ -155,6 +162,7 @@ void SettingsDialog::onSave()
     accept();
 }
 
+// Help > About. Adds the Qt version to OP2Mapper3's text.
 void showAboutDialog(QWidget *parent)
 {
     QDialog dlg(parent);

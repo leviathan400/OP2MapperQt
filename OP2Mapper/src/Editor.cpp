@@ -1,3 +1,9 @@
+// Editor: OP2Mapper3's editing state machine (GlobalVariables + the fMain
+// Editing / Clipboard / TileGroups / Terrain / MapAnalysis partial classes).
+// Every tool and mode lives here; MapView forwards mouse input, palettes and
+// MainWindow call the public operations, and signals tell them what changed.
+// Message texts are copied from the VB app so both editors read the same.
+
 #include "Editor.h"
 
 #include "CellTypeInfo.h"
@@ -19,6 +25,8 @@
 namespace {
 constexpr int T = TileImageCache::TileSize;
 
+// 32x32 tool icon for paste / tile-group mode: background, a 2 px frame and
+// "WxH" when it fits (VB draws it only if narrower than 28 px).
 QPixmap labelledSwatch(const QColor &back, const QColor &fore, int w, int h)
 {
     QPixmap pm(32, 32);
@@ -36,6 +44,7 @@ QPixmap labelledSwatch(const QColor &back, const QColor &fore, int w, int h)
     return pm;
 }
 
+// Plain 32x32 colour swatch (copy stages, cell types, terrain, cliff).
 QPixmap solidSwatch(const QColor &c)
 {
     QPixmap pm(32, 32);
@@ -68,6 +77,9 @@ QImage buildPreview(const MapDocument &doc, int w, int h, const std::vector<int>
 }
 } // namespace
 
+// The copy confirmation timer (2 s) and the enclosed-area refresh timer
+// (400 ms debounce after every edit / undo / redo) mirror the VB timers.
+// Terrain brush size and cliff options come from Mapper3.ini.
 Editor::Editor(MapDocument *doc, QWidget *dialogParent, QObject *parent)
     : QObject(parent), m_doc(doc), m_dialogParent(dialogParent)
 {
@@ -103,6 +115,7 @@ bool Editor::hasMap() const { return m_doc && m_doc->isLoaded(); }
 
 bool Editor::lockLastRow() const { return !Settings::allowEditLastRow(); }
 
+// Message boxes, parented to the main window.
 void Editor::info(const QString &title, const QString &text)
 {
     QMessageBox::information(m_dialogParent, title, text);
@@ -113,6 +126,9 @@ void Editor::warn(const QString &title, const QString &text)
     QMessageBox::warning(m_dialogParent, title, text);
 }
 
+// CellTypeBasic and CellTypeAll hide the tile graphics, so tile-related
+// actions are refused there with OP2Mapper3's "Cannot <action> while in
+// <mode> Render Mode." message. Returns true if refused.
 bool Editor::refuseInRestrictedMode(const QString &action)
 {
     if (!MapRenderer::isRestrictedMode(m_renderMode))
@@ -124,6 +140,8 @@ bool Editor::refuseInRestrictedMode(const QString &action)
 
 // ---- Map lifecycle -----------------------------------------------------------
 
+// Every load starts clean (VB LoadMapFile + ResetViewSettings): edit mode
+// off, overlays off, GameMap, no tools, empty clipboard and tile group.
 void Editor::onMapLoaded()
 {
     if (m_editMode)
@@ -151,6 +169,7 @@ void Editor::onMapLoaded()
     emit statusChanged();
 }
 
+// Close Map: like a load, but there is no map afterwards.
 void Editor::onMapClosed()
 {
     if (m_editMode)
@@ -170,6 +189,9 @@ void Editor::onMapClosed()
 
 // ---- Edit mode ---------------------------------------------------------------
 
+// Edit Mode on resets the tools (so nothing is armed); off leaves copy,
+// paste and tile-group placement first, so no click can edit with edit mode
+// off. MainWindow shows / hides the palettes on editModeChanged.
 void Editor::setEditMode(bool on)
 {
     if (on == m_editMode)
@@ -221,6 +243,8 @@ void Editor::setSingleTileMode(bool on)
     emit statusChanged();
 }
 
+// Status-bar item 0: the map file name, with " [Single Tile]" or
+// " [Drag Edit]" in edit mode, unless a mode put its own text there.
 QString Editor::statusName() const
 {
     if (!m_statusOverride.isEmpty())
@@ -241,6 +265,8 @@ void Editor::setStatusOverride(const QString &text)
 
 // ---- View state --------------------------------------------------------------
 
+// Switching into a restricted mode (CellTypeBasic / CellTypeAll) leaves copy
+// and paste and clears the tile tool; the cell-type tool stays armed.
 void Editor::setRenderMode(int mode)
 {
     if (!hasMap() || mode == m_renderMode)
@@ -275,6 +301,7 @@ void Editor::setGridSizes(int largeGridSize, int coordSpacing)
     emit overlaysChanged();
 }
 
+// The selected tile: white box on the map and the sidebar's "Tile Under Cursor".
 void Editor::setCurrentTile(const QPoint &t)
 {
     if (t == m_currentTile)
@@ -286,6 +313,9 @@ void Editor::setCurrentTile(const QPoint &t)
 
 // ---- Tools -------------------------------------------------------------------
 
+// Tile Set palette click. Uses the FIRST mapping with this (tileset, image);
+// a tile with no mapping can't be placed (OP2Mapper3 never adds mappings),
+// so the tool is left as it was but the palette highlight still moves.
 bool Editor::pickTilesetTile(int tilesetIndex, int imageIndex)
 {
     if (!hasMap())
@@ -319,6 +349,8 @@ bool Editor::pickTilesetTile(int tilesetIndex, int imageIndex)
     return true;
 }
 
+// Cell Types palette click: arms the cell-type tool. The flag, not the value,
+// arms it, so FastPassible1 (value 0) can be painted on purpose.
 void Editor::pickCellType(int cellType)
 {
     m_selectedTileImage = QImage();
@@ -335,6 +367,8 @@ void Editor::pickCellType(int cellType)
     emit overlayChanged();
 }
 
+// Map context menu "Select Tile Under Cursor": the exact mapping under the
+// cursor becomes the tile tool (works with edit mode off too, like VB).
 void Editor::selectTileUnderCursor(const QPoint &tile)
 {
     if (!m_doc->inBounds(tile.x(), tile.y()))
@@ -363,6 +397,7 @@ void Editor::selectTileUnderCursor(const QPoint &tile)
     emit cursorChanged();
 }
 
+// "Clear Tool Selection" button: drop every tool, leave paste, cancel a copy in progress.
 void Editor::clearCurrentTool()
 {
     if (!m_editMode)
@@ -388,6 +423,8 @@ void Editor::clearCurrentTool()
     emit overlayChanged();
 }
 
+// VB ResetToolUI: after a paste or a tile-group placement, nothing stays
+// armed. The clipboard is kept unless keepCopyData is false.
 void Editor::resetToolUi(bool keepCopyData)
 {
     m_activeMapping = -1;
@@ -408,6 +445,7 @@ void Editor::resetToolUi(bool keepCopyData)
 
 // ---- Copy --------------------------------------------------------------------
 
+// Normalised, inclusive copy rectangle: start to hover while selecting, start to end once copied.
 QRect Editor::copyRect() const
 {
     QPoint end = m_copyStage == 2 ? m_copyEnd : m_copyHover;
@@ -417,6 +455,8 @@ QRect Editor::copyRect() const
                  QPoint(std::max(m_copyStart.x(), end.x()), std::max(m_copyStart.y(), end.y())));
 }
 
+// Edit > Copy Tiles / Ctrl+C. Leaves paste and tile-group placement first,
+// so the next click starts the copy instead of pasting or placing.
 void Editor::beginCopy()
 {
     if (!hasMap() || !m_editMode)
@@ -439,6 +479,7 @@ void Editor::beginCopy()
     emit overlayChanged();
 }
 
+// Esc / Clear Tool while selecting. The existing clipboard is kept and Paste stays available.
 void Editor::exitCopyMode()
 {
     m_copyTimer.stop();
@@ -453,6 +494,7 @@ void Editor::exitCopyMode()
     emit overlayChanged();
 }
 
+// Second click, or a drag released on another tile.
 void Editor::finishCopySelection(const QPoint &end)
 {
     m_copyEnd = end;
@@ -464,6 +506,9 @@ void Editor::finishCopySelection(const QPoint &end)
     emit overlayChanged();
 }
 
+// Captures raw mapping indices AND cell types (always, so "Paste Includes
+// Cell Types" can be changed after copying), then starts the 2 s "copied"
+// display. Each copy gets a new generation for Tile Selection's auto-fit.
 void Editor::completeCopy()
 {
     const QRect r = copyRect();
@@ -488,6 +533,7 @@ void Editor::completeCopy()
     m_copyTimer.start();
 }
 
+// End of the 2 s "copied" display: copy mode ends and, as in VB, the active tool is cleared.
 void Editor::onCopyTimer()
 {
     m_copyMode = false;
@@ -514,6 +560,8 @@ void Editor::clearClipboard()
 bool Editor::pasteCellTypes() const { return Settings::pasteCellTypes(); }
 void Editor::setPasteCellTypes(bool on) { Settings::setPasteCellTypes(on); }
 
+// Edit > Paste Tiles / Ctrl+V. Checks in VB's order: map loaded, render mode,
+// copy still showing (stopped, data kept), clipboard not empty.
 void Editor::beginPaste()
 {
     if (!hasMap()) {
@@ -545,6 +593,7 @@ void Editor::beginPaste()
     emit overlayChanged();
 }
 
+// Tile size shrinks for big copies so the preview stays within 4096 x 4096 px.
 void Editor::rebuildPastePreview()
 {
     const int w = m_clipboard.width, h = m_clipboard.height;
@@ -553,6 +602,7 @@ void Editor::rebuildPastePreview()
     m_pastePreviewImage = buildPreview(*m_doc, w, h, m_clipboard.mappings, ts, Qt::white);
 }
 
+// Esc, or after one successful paste. Also clears the selected tile and the tools (VB ExitPasteMode).
 void Editor::exitPasteMode()
 {
     m_pasteMode = false;
@@ -567,6 +617,9 @@ void Editor::exitPasteMode()
     emit overlayChanged();
 }
 
+// A paste that would run past the map edge is refused and paste mode stays
+// armed (no clipping). Cell types are pasted only if the setting is on; the
+// bottom row never receives them (see PasteTilesCommand).
 void Editor::executePaste(const QPoint &tile)
 {
     const int w = m_clipboard.width, h = m_clipboard.height;
@@ -584,6 +637,7 @@ void Editor::executePaste(const QPoint &tile)
 
 // ---- Tile groups -------------------------------------------------------------
 
+// The group loaded in the Tile Groups palette (separate from the copy clipboard).
 void Editor::setTileGroup(const TileGroupData &g)
 {
     m_tileGroup = g;
@@ -598,6 +652,8 @@ void Editor::clearTileGroup()
     emit tileGroupChanged();
 }
 
+// Place button or Ctrl+B. With nothing loaded the button explains why; Ctrl+B
+// does nothing, as in VB.
 void Editor::beginTileGroupPlacement(bool fromButton)
 {
     if (!hasMap())
@@ -638,6 +694,8 @@ void Editor::exitTileGroupPlacement()
     emit overlayChanged();
 }
 
+// Refuses groups that run off the map, and groups using mapping indices this
+// map doesn't have ("Incompatible Tile Group"). Places tiles only, raw indices.
 void Editor::executeTileGroupPlacement(const QPoint &tile)
 {
     const int w = m_tileGroup.width, h = m_tileGroup.height;
@@ -669,6 +727,8 @@ void Editor::executeTileGroupPlacement(const QPoint &tile)
 
 // ---- Painting ----------------------------------------------------------------
 
+// Tile tool on one tile. No command when nothing changes, so a click on an
+// identical tile doesn't mark the map dirty. Tiles may go on the bottom row.
 void Editor::handleTilePlacement(const QPoint &tile)
 {
     if (m_activeMapping < 0 || m_activeMapping >= m_doc->mappingCount())
@@ -679,6 +739,10 @@ void Editor::handleTilePlacement(const QPoint &tile)
     m_doc->execute(new ChangeTileMappingCommand(m_doc, tile.x(), tile.y(), old, m_activeMapping));
 }
 
+// Cell-type tool on one tile. The bottom row is locked (unless
+// AllowEditLastRow): the drag ends BEFORE the warning, or the mouse release is
+// lost to the dialog and painting gets stuck. Painting switches to
+// CellTypeOverlayAll unless a cell-type view is already showing.
 void Editor::handleCellTypeClick(const QPoint &tile)
 {
     if (tile.y() == m_doc->lastRow() && lockLastRow()) {
@@ -698,6 +762,7 @@ void Editor::handleCellTypeClick(const QPoint &tile)
     m_doc->execute(new ChangeCellTypeCommand(m_doc, tile.x(), tile.y(), old, m_activeCellType));
 }
 
+// Mouse up (or the safety net): commit the stroke as one undo step and free the blend map.
 void Editor::endEditDrag()
 {
     m_editDragging = false;
@@ -708,6 +773,9 @@ void Editor::endEditDrag()
 
 // ---- Mouse -------------------------------------------------------------------
 
+// Left button on a map tile, in OP2Mapper3's order: paste, tile-group
+// placement, then (edit mode only) copy selection, cliff, terrain brush, tile
+// or cell-type painting. Anything that doesn't return also selects the tile.
 void Editor::mapLeftPress(const QPoint &tile)
 {
     if (!hasMap() || !m_doc->inBounds(tile.x(), tile.y()))
@@ -751,6 +819,11 @@ void Editor::mapLeftPress(const QPoint &tile)
     setCurrentTile(tile);
 }
 
+// Mouse move. The copy corner follows the mouse even outside the map
+// (clamped to the edge). Paste / group previews track the tile. If a drag is
+// open but the button is no longer held (released over a dialog), the drag
+// ends. Drag painting only happens with Single Tile Edit Mode off; the terrain
+// brush always paints along the drag, one dab per tile entered.
 void Editor::mapMouseMove(const QPoint &tileIn, bool inside, bool leftHeld)
 {
     if (!hasMap())
@@ -821,6 +894,7 @@ void Editor::mapMouseMove(const QPoint &tileIn, bool inside, bool leftHeld)
     }
 }
 
+// Mouse up: end the stroke; a drag released on another tile finishes the copy selection.
 void Editor::mapLeftRelease()
 {
     endEditDrag();
@@ -831,6 +905,7 @@ void Editor::mapLeftRelease()
     }
 }
 
+// Esc priority, as in VB: cliff points, tile-group placement, copy selection, paste.
 bool Editor::handleEscape()
 {
     if (!hasMap())
@@ -854,12 +929,15 @@ bool Editor::handleEscape()
 
 // ---- Terrain brush -----------------------------------------------------------
 
+// VB IsTerrainToolActive: picking a tile or a cell type silently takes over
+// from the brush (its flag stays set but the brush is inactive).
 bool Editor::terrainToolActive() const
 {
     return m_editMode && m_terrainActive && !m_cliffActive && m_ground >= 0
         && m_activeMapping < 0 && !m_cellToolActive;
 }
 
+// Odd sizes 3..25 only; an even size is rounded up.
 void Editor::setBrushSize(int size)
 {
     size = std::clamp(size, 3, 25);
@@ -876,6 +954,7 @@ void Editor::setBrushSize(int size)
 
 void Editor::stepBrushSize(int delta) { setBrushSize(m_brushSize + delta); }
 
+// Terrain Brush ground button: leaves the other modes and tools, turns Draw Cliff off.
 void Editor::armTerrain(int ground, const QString &name, const QColor &color)
 {
     if (m_pasteMode)
@@ -913,6 +992,7 @@ void Editor::disarmTerrain()
     emit overlayChanged();
 }
 
+// Copy, paste, tile groups and Clear Tool stop both the brush and Draw Cliff.
 void Editor::stopTerrainTools()
 {
     m_cliffActive = false;
@@ -926,6 +1006,9 @@ void Editor::stopTerrainTools()
     emit overlayChanged();
 }
 
+// A brush stroke gets a fresh op2maplib blend map built from the current
+// map (so it never needs syncing with other edits) and one random seed; the
+// whole drag becomes one undo step "Terrain Brush: <ground>".
 void Editor::beginTerrainStroke(const QPoint &tile)
 {
     if (refuseInRestrictedMode(tr("paint terrain")))
@@ -948,6 +1031,9 @@ void Editor::beginTerrainStroke(const QPoint &tile)
     terrainDab(tile);
 }
 
+// One dab: paint the ground on a disc (dx^2 + dy^2 <= (half + 0.5)^2), skipping
+// the locked bottom row, then resolve so op2maplib picks fill and transition
+// tiles. The blend map persists across dabs, so later dabs see earlier ones.
 void Editor::terrainDab(const QPoint &tile)
 {
     if (!m_strokeBlend)
@@ -983,6 +1069,7 @@ void Editor::endTerrainStroke()
     m_lastDab = QPoint(-1, -1);
 }
 
+// Applies op2maplib changes (tiles + suggested cell types) as one undoable command.
 void Editor::applyBlendChanges(const std::vector<TileChange> &changes, const QString &text)
 {
     if (changes.empty())
@@ -992,6 +1079,7 @@ void Editor::applyBlendChanges(const std::vector<TileChange> &changes, const QSt
         emit currentTileChanged();
 }
 
+// Terrain Brush > Clean Up Transitions: re-pick every blendable tile, after a confirmation with the change count.
 void Editor::cleanUpTransitions()
 {
     if (!hasMap()) {
@@ -1029,11 +1117,13 @@ void Editor::cleanUpTransitions()
 
 // ---- Draw cliff --------------------------------------------------------------
 
+// VB IsCliffToolActive: picking a tile or cell type takes over from Draw Cliff.
 bool Editor::cliffToolActive() const
 {
     return m_editMode && m_cliffActive && m_activeMapping < 0 && !m_cellToolActive;
 }
 
+// Draw Cliff on: leaves other modes, turns the brush off, starts with no points.
 void Editor::armCliff()
 {
     if (m_pasteMode)
@@ -1070,6 +1160,7 @@ void Editor::disarmCliff()
     emit overlayChanged();
 }
 
+// High side (om_cliff_side: left / right of the line, north, south) and wall height 3..6, saved to Mapper3.ini.
 void Editor::setCliffOptions(int side, int height)
 {
     m_cliffSide = std::clamp(side, 0, 3);
@@ -1079,6 +1170,8 @@ void Editor::setCliffOptions(int side, int height)
     emit toolChanged();
 }
 
+// Adds a point, snapped by op2maplib to an allowed cliff slope. Clicking the
+// first point again (with at least 3 others) closes the loop and places it.
 void Editor::cliffClick(const QPoint &tile)
 {
     if (refuseInRestrictedMode(tr("draw cliffs")))
@@ -1097,6 +1190,9 @@ void Editor::cliffClick(const QPoint &tile)
     emit toolChanged();
 }
 
+// Enter / Place Cliff: op2maplib fits its cliff tiles along the points. The
+// cliff is one undo step; the tool stays armed for the next cliff. A negative
+// solver stage means no exact fit was found ("rough joins").
 void Editor::placeCliff()
 {
     if (!hasMap() || !cliffToolActive())
@@ -1142,6 +1238,7 @@ void Editor::placeCliff()
     emit overlayChanged();
 }
 
+// Enter places, Backspace removes the last point, Esc clears the points (or turns the tool off).
 bool Editor::handleCliffKey(int key)
 {
     if (!cliffToolActive())
@@ -1177,6 +1274,7 @@ bool Editor::handleCliffKey(int key)
 
 // ---- Enclosed areas ----------------------------------------------------------
 
+// Every passable region except the largest (the main play area) is enclosed.
 void Editor::recomputeEnclosed()
 {
     m_enclosed.clear();
@@ -1188,6 +1286,7 @@ void Editor::recomputeEnclosed()
         m_enclosed += regions[i];
 }
 
+// Edit > Highlight Enclosed Areas (magenta overlay, refreshed after edits).
 void Editor::setHighlightEnclosed(bool on)
 {
     if (on) {
@@ -1213,6 +1312,8 @@ void Editor::setHighlightEnclosed(bool on)
     emit overlayChanged();
 }
 
+// Edit > Find & Fix Enclosed Areas: turn every enclosed passable tile into
+// Impassible1, as one undoable command, after showing the area sizes.
 void Editor::findAndFixEnclosedAreas()
 {
     const QString title = tr("Find & Fix Enclosed Areas");
@@ -1275,6 +1376,8 @@ void Editor::findAndFixEnclosedAreas()
 
 // ---- Labels ------------------------------------------------------------------
 
+// Sidebar "Editing" labels and icon, in VB's precedence: no edit mode, tile
+// group, paste, cliff, terrain, copy, tile tool, cell-type tool, nothing.
 ToolLabels Editor::toolLabels() const
 {
     ToolLabels l;

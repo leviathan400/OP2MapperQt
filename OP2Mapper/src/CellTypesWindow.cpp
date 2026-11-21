@@ -1,3 +1,5 @@
+// CellTypesWindow: the Cell Types palette.
+
 #include "CellTypesWindow.h"
 
 #include "CellTypeInfo.h"
@@ -39,6 +41,7 @@ void CellTypesWindow::apply(int row)
     m_editor->pickCellType(ct);
 }
 
+// Clears the highlight without arming or disarming anything.
 void CellTypesWindow::clearSelection()
 {
     const QSignalBlocker block(m_list);

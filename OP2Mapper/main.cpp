@@ -1,3 +1,7 @@
+// Entry point: single-instance check, log, settings migration, splash
+// screen, main window, and the local server that receives a second launch's
+// arguments.
+
 #include <QApplication>
 #include <QDataStream>
 #include <QDir>
@@ -20,6 +24,7 @@
 
 namespace {
 
+// One running copy per Windows user.
 QString instanceName()
 {
     const QString user = qEnvironmentVariable("USERNAME", qEnvironmentVariable("USER"));
@@ -42,6 +47,7 @@ bool forwardToRunningInstance(const QStringList &args)
     return true;
 }
 
+// OP2Mapper3's splash text, drawn in code.
 QPixmap splashPixmap()
 {
     QPixmap pm(496, 303);
@@ -66,6 +72,7 @@ QPixmap splashPixmap()
     return pm;
 }
 
+// Logs exceptions that escape an event handler instead of letting them end the app silently.
 class App : public QApplication
 {
 public:

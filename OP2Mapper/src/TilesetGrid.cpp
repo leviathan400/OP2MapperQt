@@ -1,3 +1,5 @@
+// TilesetGrid: the tile grid inside the Tile Set palette.
+
 #include "TilesetGrid.h"
 
 #include <QMouseEvent>
@@ -18,6 +20,7 @@ int TilesetGrid::tileCount() const
     return (m_image && m_image->height() >= TileSize) ? m_image->height() / TileSize : 0;
 }
 
+// At least the viewport size, so the background fills it; rows of 33 px otherwise.
 void TilesetGrid::updateSize()
 {
     const int n = tileCount();
@@ -26,6 +29,7 @@ void TilesetGrid::updateSize()
     resize(std::max(Columns * Stride, view.width()), std::max(rows * Stride, view.height()));
 }
 
+// The image belongs to the document's TileImageCache; the palette resets it when the map changes.
 void TilesetGrid::setTilesetImage(const QImage *image)
 {
     m_image = image;
@@ -42,6 +46,7 @@ void TilesetGrid::setSelectedTile(int index)
     update();
 }
 
+// Only rows inside the exposed area are drawn. Grey border per tile, red 2 px box on the selection.
 void TilesetGrid::paintEvent(QPaintEvent *event)
 {
     QPainter p(this);
@@ -77,6 +82,9 @@ void TilesetGrid::paintEvent(QPaintEvent *event)
     }
 }
 
+// Left click picks a tile; clicks in the empty strip right of the 6th column
+// are ignored (they used to select the next row's first tile in VB). Right
+// button starts a pan.
 void TilesetGrid::mousePressEvent(QMouseEvent *event)
 {
     const QPoint pos = event->position().toPoint();
@@ -98,6 +106,7 @@ void TilesetGrid::mousePressEvent(QMouseEvent *event)
     emit tileClicked(idx);
 }
 
+// Right-drag scrolls the palette.
 void TilesetGrid::mouseMoveEvent(QMouseEvent *event)
 {
     if (!m_panning || !(event->buttons() & Qt::RightButton) || !m_scroll)

@@ -1,3 +1,5 @@
+// TileImageCache: tileset graphics for one map.
+
 #include "TileImageCache.h"
 
 #include "CellTypeInfo.h"
@@ -11,6 +13,7 @@
 
 namespace {
 
+// Converts an 8-bit tileset BMP to a top-down ARGB32 strip.
 QImage bitmapToImage(const OP2Utility::BitmapFile &bmp)
 {
     const int width = bmp.imageHeader.width;
@@ -54,6 +57,9 @@ TileImageCache::TileImageCache(OP2Utility::ResourceManager *resources,
 {
 }
 
+// Loose file in the tileset folder first, then the ResourceManager (.vol).
+// ".bmp" is appended unless the name has it. Sources with the same file name
+// share one strip.
 QStringList TileImageCache::load(const std::vector<OP2Utility::TilesetSource> &sources)
 {
     m_tilesets.clear();
@@ -146,6 +152,7 @@ QImage TileImageCache::tile(std::size_t tilesetIndex, std::size_t imageIndex) co
     return ts->copy(0, y, TileSize, TileSize);
 }
 
+// Scaled once per tile size and kept, so zoomed drawing is a plain blit.
 const QPixmap *TileImageCache::scaledStrip(std::size_t tilesetIndex, int tilePx) const
 {
     const QImage *ts = tileset(tilesetIndex);
@@ -164,6 +171,7 @@ const QPixmap *TileImageCache::scaledStrip(std::size_t tilesetIndex, int tilePx)
     return &m_scaled.insert(key, pm).value();
 }
 
+// OP2Mapper3's placeholder for a missing graphic: the Basic cell-type colour with a grey frame and X.
 const QPixmap &TileImageCache::fallbackTile(int cellType, int tilePx) const
 {
     const quint32 key = (static_cast<quint32>(cellType & 0xFF) << 16) | static_cast<quint32>(tilePx & 0xFFFF);

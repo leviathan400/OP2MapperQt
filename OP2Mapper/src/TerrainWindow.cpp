@@ -1,3 +1,5 @@
+// TerrainWindow: the Terrain Brush palette, laid out in code like OP2Mapper3's fTerrain.
+
 #include "TerrainWindow.h"
 
 #include "Editor.h"
@@ -14,6 +16,7 @@
 
 namespace {
 
+// 14x14 ground colour swatch with a black border, for the ground buttons.
 QIcon swatch(const QColor &c)
 {
     QPixmap pm(14, 14);
@@ -53,6 +56,8 @@ protected:
 
 } // namespace
 
+// Without the op2maplib profile the window only explains why the brush is
+// unavailable. The window height is computed to fit the help text.
 TerrainWindow::TerrainWindow(Editor *editor, QWidget *mainWindow)
     : ToolPalette(QStringLiteral("Terrain"), QStringLiteral("fTerrain"), mainWindow)
     , m_editor(editor)
@@ -179,6 +184,7 @@ TerrainWindow::TerrainWindow(Editor *editor, QWidget *mainWindow)
     syncFromState();
 }
 
+// Buttons follow the Editor (radio-like grounds, Draw Cliff toggle) without re-triggering it.
 void TerrainWindow::syncFromState()
 {
     m_syncing = true;

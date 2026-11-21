@@ -1,3 +1,5 @@
+// CellTypeInfo: per-cell-type tables copied from OP2Mapper3.
+
 #include "CellTypeInfo.h"
 
 namespace {
@@ -71,6 +73,7 @@ const Row kRows[CellTypeInfo::Count] = {
     { "Tube 4 (T4)", 30 },             { "Tube 5 (T5)", 31 },
 };
 
+// Out-of-range values use a zPad entry (white).
 const Style &style(int ct)
 {
     return kStyles[(ct >= 0 && ct < CellTypeInfo::Count) ? ct : 12];
@@ -93,6 +96,7 @@ QColor basicColor(int ct) { return QColor::fromRgba(style(ct).basic); }
 QColor detailedColor(int ct) { return QColor::fromRgba(style(ct).detailed); }
 QColor overlayColor(int ct) { return QColor::fromRgba(style(ct).overlay); }
 
+// OP2Mapper3 GetCellTypeColor: colour by passability category.
 QColor categoryColor(int ct)
 {
     switch (ct) {

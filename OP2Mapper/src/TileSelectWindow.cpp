@@ -1,3 +1,5 @@
+// TileSelectWindow: the Tile Selection palette.
+
 #include "TileSelectWindow.h"
 
 #include "CellTypeInfo.h"
@@ -140,6 +142,7 @@ TileSelectWindow::TileSelectWindow(Editor *editor, QWidget *mainWindow)
     refreshPreview();
 }
 
+// Normal or Large size, shrunk to the screen and kept inside it.
 void TileSelectWindow::applyWindowSize()
 {
     QSize target = m_large ? kLarge : kNormal;
@@ -158,6 +161,7 @@ void TileSelectWindow::applyWindowSize()
     m_scroll->setGeometry(1, 1, width() - 2, height() - 2);
 }
 
+// Pixels per tile for the current zoom, or the largest that fits for "Zoom to Fit Window".
 int TileSelectWindow::previewTileSize(int w, int h) const
 {
     const QSize view = m_scroll->size() - QSize(2, 2);
@@ -166,6 +170,7 @@ int TileSelectWindow::previewTileSize(int w, int h) const
     return std::max(1, static_cast<int>(std::lround(32 * m_zoom)));
 }
 
+// Each new copy opens at the largest zoom that shows it whole; if none does, the current zoom stays.
 void TileSelectWindow::pickZoomForNewCopy(int w, int h)
 {
     const QSize view = m_scroll->size() - QSize(2, 2);
@@ -181,6 +186,9 @@ void TileSelectWindow::pickZoomForNewCopy(int w, int h)
     }
 }
 
+// Renders the copy: light grey background, grey grid when tiles are at least
+// 8 px, optional cell-type shading, dark blue border. Large copies use a
+// smaller tile size so the image stays within 4096 px.
 void TileSelectWindow::refreshPreview()
 {
     m_preview = QImage();
@@ -244,6 +252,7 @@ void TileSelectWindow::setLargeWindow(bool on)
     refreshPreview();
 }
 
+// Keeps the same point of the copy centred and saves the zoom.
 void TileSelectWindow::setZoom(double zoom, bool fit)
 {
     QScrollBar *h = m_scroll->horizontalScrollBar();
@@ -276,6 +285,7 @@ void TileSelectWindow::setShowCellTypes(bool on)
     m_scroll->verticalScrollBar()->setValue(vv);
 }
 
+// Ctrl+wheel steps 100 / 75 / 50 / 25%; from Fit it restarts at 100%.
 void TileSelectWindow::stepZoom(int delta)
 {
     int idx = 0;
@@ -302,6 +312,7 @@ void TileSelectWindow::wheelEvent(QWheelEvent *event)
     event->accept();
 }
 
+// Title-bar menu extras: Large Window, the zoom levels, Show Cell Types.
 void TileSelectWindow::addMenuExtras(QMenu *menu)
 {
     QAction *large = menu->addAction(tr("Large Window"));
@@ -341,6 +352,8 @@ void TileSelectWindow::showContextMenu(const QPoint &globalPos)
         setShowCellTypes(!m_showCellTypes);
 }
 
+// Right-click > Export Tile Group: writes <Tilegroups>/Exported/<name>.bmp
+// (then offers to show it), then <name>.json; existing files are replaced.
 void TileSelectWindow::exportTileGroup()
 {
     const TileClipboardData &c = m_editor->clipboard();

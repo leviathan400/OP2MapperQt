@@ -1,3 +1,5 @@
+// OP2Launcher: launching Outpost 2 and the bundled op2launcher, plus sound playback.
+
 #include "OP2Launcher.h"
 
 #include "AppLog.h"
@@ -20,6 +22,7 @@
 
 namespace {
 
+// Every launch action first needs an existing Outpost 2 folder.
 bool checkOp2Path(QWidget *parent, const QString &title)
 {
     const QString op2 = Settings::op2Path();
@@ -30,6 +33,7 @@ bool checkOp2Path(QWidget *parent, const QString &title)
     return false;
 }
 
+// MD5 in .NET's "AB-CD-..." form, for log lines that match OP2Mapper3's.
 QString md5Hex(const QByteArray &bytes)
 {
     const QByteArray h = QCryptographicHash::hash(bytes, QCryptographicHash::Md5).toHex().toUpper();
@@ -54,6 +58,10 @@ bool writeFile(const QString &path, const QByteArray &bytes, QString &error)
     return true;
 }
 
+// Copies the bundled op2launcher.exe + Launcher.dll into <OP2>/OPU if they
+// aren't there. An identical exe only gets a missing DLL restored; a different
+// one is replaced only if the user says Yes (No keeps theirs, Cancel aborts).
+// op2launcher registers itself in outpost2.ini, so copying is all it needs.
 bool ensureInstalled(QWidget *parent, const QString &title)
 {
     if (!checkOp2Path(parent, title))
@@ -122,6 +130,7 @@ bool ensureInstalled(QWidget *parent, const QString &title)
 
 namespace OP2Launcher {
 
+// File > Launch Outpost 2: <OP2>/OPU/OPULauncher.exe.
 void launchOutpost2(QWidget *parent)
 {
     const QString title = QObject::tr("Launch Outpost 2");
@@ -141,6 +150,7 @@ void launchOutpost2(QWidget *parent)
     AppLog::write(QStringLiteral("Launch"), QStringLiteral("Started Outpost 2: %1").arg(QDir::toNativeSeparators(exe)));
 }
 
+// File > Launch OP2 into DLL Picker: op2launcher.exe --picker.
 void launchDllPicker(QWidget *parent)
 {
     const QString title = QObject::tr("Launch DLL Picker");
@@ -160,6 +170,7 @@ void launchDllPicker(QWidget *parent)
     AppLog::write(QStringLiteral("Launch"), QStringLiteral("Started op2launcher.exe --picker"));
 }
 
+// File > Open Outpost 2 Folder.
 void openGameFolder(QWidget *parent)
 {
     const QString title = QObject::tr("Open Outpost 2 Folder");
@@ -174,6 +185,7 @@ void openGameFolder(QWidget *parent)
 
 namespace Sounds {
 
+// Asynchronous WAV playback (Windows; silent elsewhere). Missing files are ignored.
 void playFile(const QString &path)
 {
 #ifdef Q_OS_WIN
@@ -186,6 +198,7 @@ void playFile(const QString &path)
 #endif
 }
 
+// The WAV bytes must stay alive while playing, hence the static buffer.
 void playResource(const QString &resourcePath)
 {
 #ifdef Q_OS_WIN
