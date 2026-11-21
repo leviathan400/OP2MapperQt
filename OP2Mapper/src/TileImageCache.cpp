@@ -45,7 +45,11 @@ QImage bitmapToImage(const OP2Utility::BitmapFile &bmp)
 
     QImage rgb = indexed.convertToFormat(QImage::Format_ARGB32);
     if (bmp.GetScanLineOrientation() == OP2Utility::ScanLineOrientation::BottomUp)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
         rgb = rgb.flipped(Qt::Vertical);
+#else
+        rgb = rgb.mirrored(false, true);
+#endif
     return rgb;
 }
 

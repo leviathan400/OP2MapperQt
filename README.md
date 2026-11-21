@@ -1,5 +1,7 @@
 # OP2MapperQt
 
+[![Build](https://github.com/leviathan400/OP2MapperQt/actions/workflows/build.yml/badge.svg)](https://github.com/leviathan400/OP2MapperQt/actions/workflows/build.yml)
+
 ![Screenshot](https://images.outpostuniverse.org/OP2MapperQt.png)
 
 ## What is it?
@@ -79,6 +81,8 @@ Qt 6 (Widgets, Network) and CMake 3.16+. Two libraries are needed:
 cmake -S OP2Mapper -B build -DCMAKE_PREFIX_PATH=<path-to-Qt>
 cmake --build build
 ```
+
+Every push is built on Windows (MSVC), Linux (GCC) and macOS (Clang) by GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)), which checks out OP2Utility and OP2MappingLib at pinned commits. Each run keeps a downloadable build: a ready-to-run Windows folder, a macOS app bundle, and the Linux executable (Qt 6 must be installed to run it). OP2Utility's upstream repository has no CMake files; the app's CMake builds its sources directly in that case.
 
 A headless self-test of the editing core can be built with `-DOP2MAPPER_BUILD_SELFTEST=ON`. It needs an Outpost 2 install, and writes rendered images to the output folder:
 

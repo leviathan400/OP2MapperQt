@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace {
 constexpr int T = TileImageCache::TileSize;

@@ -83,6 +83,11 @@ add_library(op2mapper_core STATIC
 target_include_directories(op2mapper_core PUBLIC src)
 target_link_libraries(op2mapper_core PUBLIC Qt6::Widgets Qt6::Network)
 set_target_properties(op2mapper_core PROPERTIES AUTOMOC ON)
+# Message texts contain non-ASCII characters (×, —, →); MSVC
+# must read and store the sources as UTF-8.
+if(MSVC)
+    target_compile_options(op2mapper_core PUBLIC /utf-8)
+endif()
 
 qt_add_executable(appOP2Mapper
     main.cpp
@@ -95,6 +100,8 @@ target_link_libraries(appOP2Mapper PRIVATE op2mapper_core)
 if(WIN32)
     # winmm: PlaySound; dwmapi: palette snapping on the visible window frame
     target_link_libraries(op2mapper_core PUBLIC winmm dwmapi)
+    # Keep <windows.h> from defining min/max macros (they break std::min/max).
+    target_compile_definitions(op2mapper_core PUBLIC NOMINMAX)
 endif()
 
 # op2maplib: terrain blending, cliffs and enclosed-area regions (C API).
@@ -107,32 +114,50 @@ set(OP2MAPLIB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(OP2MAPLIB_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory("${OP2MAPLIB_DIR}" "${CMAKE_BINARY_DIR}/op2maplib")
 target_link_libraries(op2mapper_core PUBLIC op2maplib)
+# op2maplib links the static MSVC runtime for its standalone DLL; as a
+# static library inside this app it must use the same runtime as Qt.
+if(MSVC)
+    set_property(TARGET op2maplib PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
 set_source_files_properties("${OP2MAPLIB_DIR}/profiles/op2.json"
     PROPERTIES QT_RESOURCE_ALIAS op2.json)
 qt_add_resources(op2mapper_core op2maplib_profile
     PREFIX "/op2maplib"
     FILES "${OP2MAPLIB_DIR}/profiles/op2.json")
 
+# OP2Utility: map, tileset and archive I/O. Use its CMake project if the
+# checkout has one; otherwise (a plain clone of the upstream repository,
+# which ships no CMake files) build its sources here.
 if(EXISTS "${OP2UTIL_DIR}/CMakeLists.txt")
-    message(STATUS "OP2Utility found at ${OP2UTIL_DIR} — linking.")
     add_subdirectory("${OP2UTIL_DIR}" "${CMAKE_BINARY_DIR}/OP2Utility")
-    target_link_libraries(op2mapper_core PUBLIC OP2Utility)
-    target_compile_definitions(op2mapper_core PUBLIC OP2MAPPER_HAVE_OP2UTILITY=1)
 elseif(EXISTS "${OP2UTIL_DIR}/OP2Utility/CMakeLists.txt")
-    message(STATUS "OP2Utility found at ${OP2UTIL_DIR}/OP2Utility — linking.")
     add_subdirectory("${OP2UTIL_DIR}/OP2Utility" "${CMAKE_BINARY_DIR}/OP2Utility")
-    target_link_libraries(op2mapper_core PUBLIC OP2Utility)
-    target_compile_definitions(op2mapper_core PUBLIC OP2MAPPER_HAVE_OP2UTILITY=1)
+elseif(EXISTS "${OP2UTIL_DIR}/OP2Utility/src")
+    file(GLOB_RECURSE OP2UTIL_SOURCES CONFIGURE_DEPENDS
+        "${OP2UTIL_DIR}/OP2Utility/src/*.cpp"
+        "${OP2UTIL_DIR}/OP2Utility/src/*.h")
+    add_library(OP2Utility STATIC ${OP2UTIL_SOURCES})
+    target_include_directories(OP2Utility PUBLIC
+        "${OP2UTIL_DIR}/OP2Utility/include"
+        "${OP2UTIL_DIR}/OP2Utility/src")
+    target_compile_features(OP2Utility PUBLIC cxx_std_20)
 else()
-    message(WARNING "OP2Utility not found at ${OP2UTIL_DIR}. Building UI-only stub. "
-                    "Clone https://github.com/OutpostUniverse/OP2Utility there to enable map loading.")
+    message(FATAL_ERROR "OP2Utility not found at ${OP2UTIL_DIR}. Clone "
+                        "https://github.com/OutpostUniverse/OP2Utility there or set -DOP2UTIL_DIR=<path>.")
 endif()
+message(STATUS "OP2Utility: ${OP2UTIL_DIR}")
+target_link_libraries(op2mapper_core PUBLIC OP2Utility)
+target_compile_definitions(op2mapper_core PUBLIC OP2MAPPER_HAVE_OP2UTILITY=1)
 
 set_target_properties(appOP2Mapper PROPERTIES
     WIN32_EXECUTABLE TRUE
+    MACOSX_BUNDLE TRUE
+    MACOSX_BUNDLE_BUNDLE_NAME OP2Mapper
+    MACOSX_BUNDLE_GUI_IDENTIFIER org.outpostuniverse.op2mapperqt
 )
 
 install(TARGETS appOP2Mapper
+    BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 

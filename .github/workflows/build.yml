@@ -1,0 +1,113 @@
+# Builds OP2MapperQt on Windows, Linux and macOS.
+#
+# The two libraries the app needs are checked out at pinned commits:
+#   OP2Utility    -> OP2MapperQt/OP2Utility   (upstream has no CMake files;
+#                    OP2Mapper/CMakeLists.txt builds its sources directly)
+#   OP2MappingLib -> OP2MappingLib, beside the repository (op2maplib)
+# Bump the *_REF values below to build against newer versions.
+#
+# Each job uploads a build: a deployed Windows folder (windeployqt), a
+# macOS app bundle (macdeployqt), and the Linux executable (needs Qt 6
+# installed to run).
+
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  QT_VERSION: '6.10.1'
+  OP2UTILITY_REF: 7be4bbd1061f7ff2438fc3961c78b1a8b66ce6c1
+  OP2MAPPINGLIB_REF: 3091881a25b2be1b065c0a24a74734c146c8c236  # v0.3.0
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2022
+            qt_arch: win64_msvc2022_64
+          - name: Linux
+            os: ubuntu-24.04
+            qt_arch: linux_gcc_64
+          - name: macOS
+            os: macos-latest
+            qt_arch: clang_64
+
+    steps:
+      - name: Check out OP2MapperQt
+        uses: actions/checkout@v5
+        with:
+          path: OP2MapperQt
+
+      - name: Check out OP2Utility
+        uses: actions/checkout@v5
+        with:
+          repository: OutpostUniverse/OP2Utility
+          ref: ${{ env.OP2UTILITY_REF }}
+          path: OP2MapperQt/OP2Utility
+
+      - name: Check out OP2MappingLib
+        uses: actions/checkout@v5
+        with:
+          repository: OutpostUniverse/OP2MappingLib
+          ref: ${{ env.OP2MAPPINGLIB_REF }}
+          path: OP2MappingLib
+
+      - name: Install Linux build packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libegl1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+
+      - name: Configure
+        working-directory: OP2MapperQt
+        run: cmake -S OP2Mapper -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        working-directory: OP2MapperQt
+        run: cmake --build build --config Release --parallel
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        working-directory: OP2MapperQt
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item build/Release/appOP2Mapper.exe dist/
+          windeployqt --release --no-translations dist/appOP2Mapper.exe
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        working-directory: OP2MapperQt
+        run: |
+          macdeployqt build/appOP2Mapper.app
+          mkdir -p dist
+          ditto -c -k --keepParent build/appOP2Mapper.app dist/OP2MapperQt-macOS.zip
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        working-directory: OP2MapperQt
+        run: |
+          mkdir -p dist
+          cp build/appOP2Mapper dist/
+          tar -czf dist/OP2MapperQt-Linux.tar.gz -C dist appOP2Mapper
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: OP2MapperQt-${{ matrix.name }}
+          path: OP2MapperQt/dist

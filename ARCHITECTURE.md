@@ -9,6 +9,7 @@ Keep this document up to date when the structure changes.
 ```
 OP2MapperQt/
 ├── README.md, ARCHITECTURE.md
+├── .github/workflows/build.yml # CI: Windows, Linux and macOS builds
 ├── OP2Utility/                 # OP2Utility C++ library (map, tileset and archive I/O)
 └── OP2Mapper/
     ├── CMakeLists.txt          # op2mapper_core library + appOP2Mapper (+ optional self-test)
@@ -155,6 +156,14 @@ Dirty state comes from the undo stack's clean index. `markNewUnsaved()` makes th
 ## 6. Testing
 
 There is no unit-test framework. `tests/selftest.cpp` (CMake option `OP2MAPPER_BUILD_SELFTEST`) drives the real `Editor`, `MapDocument`, `MapView` and `MainWindow` headlessly against an Outpost 2 install. It writes the Outpost 2 folder into the `Mapper3.ini` next to the test exe, answers message boxes automatically, and writes rendered images to check by eye. Run it with `QT_QPA_PLATFORM=offscreen` (and `QT_QPA_FONTDIR` pointing at a font folder so text renders).
+
+### Continuous integration
+
+`.github/workflows/build.yml` builds the app on Windows (MSVC), Linux (GCC) and macOS (Clang) with Qt 6.10 on every push and pull request, and uploads the builds as artifacts (windeployqt folder, macdeployqt app bundle, Linux executable). It checks out OP2Utility into `OP2Utility/` and OP2MappingLib beside the repository, both at pinned commits (`OP2UTILITY_REF`, `OP2MAPPINGLIB_REF`). Portability notes the build relies on:
+
+- Windows-only code (sounds, palette snapping and title-bar menu, hidden folders) is behind `Q_OS_WIN`; Windows builds define `NOMINMAX`.
+- MSVC compiles with `/utf-8` (message texts contain non-ASCII characters) and links op2maplib against the same C runtime as Qt.
+- Qt 6.8 still works locally (`QImage::mirrored` is used before 6.9), but the current macOS SDK needs Qt 6.9 or later.
 
 ## 7. Glossary
 

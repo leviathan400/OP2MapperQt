@@ -46,6 +46,7 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QScreen>
 #include <QShortcut>
