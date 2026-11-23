@@ -10,6 +10,7 @@
 class CellTypesWindow;
 class Editor;
 class MapDocument;
+class GenerateMapDialog;
 class MapView;
 class MiniMap;
 class Sidebar;
@@ -22,6 +23,7 @@ class QAction;
 class QLabel;
 class QMenu;
 struct MapLoadInfo;
+namespace Op2Lib { struct GeneratedMap; }
 
 // Application shell (OP2Mapper3 fMain): menus, map panel, sidebar, status
 // bar, the six tool palettes (shown with Edit Mode), and the file flows.
@@ -55,6 +57,9 @@ private:
     void showTilesetWarnings(const MapLoadInfo &info);
     bool confirmDiscardChanges();
     void onNewMap();
+    void onGenerateMap();
+    bool isUntouchedGeneratedMap() const;
+    bool showGeneratedMap(const Op2Lib::GeneratedMap &gen, const QString &fileName);
     bool createNewMap(const NewMapDialog::Result &r);
     void onOpenMap();
     bool onSaveMap();
@@ -128,4 +133,8 @@ private:
 
     QTimer m_positionTimer;
     bool m_positionRestored = false;
+
+    GenerateMapDialog *m_generateDialog = nullptr;
+    // True while the open map is the last one the generator produced.
+    bool m_generatedMapShown = false;
 };

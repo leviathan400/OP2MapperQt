@@ -160,6 +160,8 @@ void Editor::onMapLoaded()
     m_selectedImageIndex = -1;
     m_currentTile = QPoint(-1, -1);
     m_statusOverride.clear();
+    m_genSpawns.clear();
+    m_genVolcanoes.clear();
     clearClipboard();
     clearTileGroup();
     emit renderModeChanged(m_renderMode);
@@ -179,6 +181,8 @@ void Editor::onMapClosed()
     m_highlightOn = false;
     m_enclosed.clear();
     emit highlightChanged(false);
+    m_genSpawns.clear();
+    m_genVolcanoes.clear();
     m_currentTile = QPoint(-1, -1);
     m_statusOverride.clear();
     emit currentTileChanged();
@@ -1270,6 +1274,15 @@ bool Editor::handleCliffKey(int key)
     default:
         return false;
     }
+}
+
+// ---- Generated map markers ---------------------------------------------------
+
+void Editor::setGeneratedMarkers(const QVector<QPoint> &spawns, const QVector<QPoint> &volcanoes)
+{
+    m_genSpawns = spawns;
+    m_genVolcanoes = volcanoes;
+    emit overlayChanged();
 }
 
 // ---- Enclosed areas ----------------------------------------------------------

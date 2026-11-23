@@ -252,4 +252,148 @@ bool findRegions(const MapDocument &doc, QVector<QVector<QPoint>> &regions, QStr
     return true;
 }
 
+// ---- Map generator ----------------------------------------------------------
+
+namespace {
+// RAII for om_mapgen_settings.
+struct SettingsHandle {
+    om_mapgen_settings *s;
+    explicit SettingsHandle(const QString &templateName)
+        : s(om_mapgen_settings_create(templateName.toUtf8().constData())) {}
+    ~SettingsHandle() { om_mapgen_settings_free(s); }
+};
+
+QVector<QPoint> toPoints(const std::vector<int32_t> &xy, int count)
+{
+    QVector<QPoint> out;
+    out.reserve(count);
+    for (int i = 0; i < count; ++i)
+        out.append(QPoint(xy[2 * i], xy[2 * i + 1]));
+    return out;
+}
+} // namespace
+
+double mapGenTemplateDefault(const QString &templateName, const QString &key)
+{
+    SettingsHandle h(templateName);
+    return h.s ? om_mapgen_get(h.s, key.toUtf8().constData()) : 0.0;
+}
+
+int standardMappingCount()
+{
+    const om_profile *p = profile();
+    return p ? om_profile_standard_mapping_count(p) : 0;
+}
+
+QString groundName(int ground)
+{
+    const om_profile *p = profile();
+    const char *n = p ? om_profile_ground_name(p, ground) : nullptr;
+    return n ? QString::fromUtf8(n) : QString();
+}
+
+bool generateMap(const MapGenRequest &r, GeneratedMap &out, QString &error)
+{
+    out = GeneratedMap();
+    const om_profile *p = profile();
+    if (!p) {
+        error = profileError();
+        return false;
+    }
+    SettingsHandle h(r.templateName);
+    if (!h.s) {
+        error = QStringLiteral("Could not create the generator settings.");
+        return false;
+    }
+    om_mapgen_set(h.s, "width", r.width);
+    om_mapgen_set(h.s, "height", r.height);
+    om_mapgen_set_seed(h.s, r.seed);
+    // All mix sliders at 0 keeps the template's own mix.
+    if (!r.mix.isEmpty()) {
+        om_mapgen_clear_mix(h.s);
+        for (const auto &m : r.mix)
+            om_mapgen_set_mix(h.s, m.first.toUtf8().constData(), m.second);
+    }
+    om_mapgen_set(h.s, "roughness", r.roughness);
+    om_mapgen_set(h.s, "min_biome", r.minBiome);
+    om_mapgen_set(h.s, "symmetry", r.symmetry);
+    om_mapgen_set(h.s, "cliffs", r.cliffs);
+    om_mapgen_set(h.s, "details", r.details);
+    om_mapgen_set(h.s, "spawns", r.spawns);
+    om_mapgen_set(h.s, "volcanoes", r.volcanoes);
+    for (const MapGenFeature &f : r.features) {
+        const QByteArray where = f.where.toUtf8();
+        const QByteArray to = f.to.toUtf8();
+        om_mapgen_add_feature(h.s, f.kind, where.constData(), to.constData(), f.size, f.lava ? 1 : 0);
+    }
+
+    char err[512] = {};
+    om_mapgen_result *res = om_mapgen_generate(p, h.s, err, sizeof err);
+    if (!res) {
+        error = QString::fromUtf8(err);
+        return false;
+    }
+    out.width = om_mapgen_width(res);
+    out.height = om_mapgen_height(res);
+    const int n = out.width * out.height;
+    out.tiles.resize(static_cast<std::size_t>(n));
+    out.cellTypes.resize(static_cast<std::size_t>(n));
+    om_mapgen_get_tiles(res, out.tiles.data(), n);
+    om_mapgen_get_cell_types(res, out.cellTypes.data(), n);
+    for (int list : { OM_MAPGEN_SPAWNS, OM_MAPGEN_VOLCANOES }) {
+        const int count = om_mapgen_point_count(res, list);
+        std::vector<int32_t> xy(static_cast<std::size_t>(count) * 2);
+        const int got = om_mapgen_get_points(res, list, xy.data(), count);
+        (list == OM_MAPGEN_SPAWNS ? out.spawns : out.volcanoes) = toPoints(xy, got);
+    }
+    const int zones = om_mapgen_lava_zone_count(res);
+    for (int z = 0; z < zones; ++z) {
+        const int size = om_mapgen_lava_zone_size(res, z);
+        std::vector<int32_t> xy(static_cast<std::size_t>(size) * 2);
+        out.lavaZones.append(toPoints(xy, om_mapgen_lava_zone_cells(res, z, xy.data(), size)));
+    }
+    out.passableShare = om_mapgen_stat(res, "passable");
+    out.plateauShare = om_mapgen_stat(res, "plateau");
+    out.connected = om_mapgen_stat(res, "connected") != 0.0;
+    const int grounds = om_profile_ground_count(p);
+    for (int g = 0; g < grounds; ++g)
+        out.groundShares.append(om_mapgen_ground_share(res, g));
+    om_mapgen_result_free(res);
+    return true;
+}
+
+bool applyGeneratedMap(MapDocument &doc, const GeneratedMap &gen, QString &error)
+{
+    if (!doc.isLoaded() || doc.widthTiles() != gen.width || doc.heightTiles() != gen.height) {
+        error = QStringLiteral("The blank template doesn't match the generated map's size.");
+        return false;
+    }
+    int maxTile = 0;
+    for (uint16_t t : gen.tiles)
+        maxTile = std::max(maxTile, static_cast<int>(t));
+    if (maxTile >= doc.mappingCount()) {
+        error = QStringLiteral("The blank template's tile mapping table (%1 entries) is smaller than the "
+                               "generator's (tile %2 used).").arg(doc.mappingCount()).arg(maxTile);
+        return false;
+    }
+    const int w = gen.width;
+    for (int y = 0; y < gen.height; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const std::size_t i = static_cast<std::size_t>(y) * w + x;
+            doc.setMappingIndexAt(x, y, gen.tiles[i]);
+            doc.setCellTypeAt(x, y, gen.cellTypes[i] & 0x1F);
+            doc.setLavaPossibleAt(x, y, false);
+        }
+    }
+    for (const auto &zone : gen.lavaZones)
+        for (const QPoint &p : zone)
+            doc.setLavaPossibleAt(p.x(), p.y(), true);
+    // The bottom row isn't shown in game and must stay Impassable.
+    constexpr int kImpassible1 = 6;
+    for (int x = 0; x < w; ++x)
+        doc.setCellTypeAt(x, gen.height - 1, kImpassible1);
+    doc.flushChanges();
+    return true;
+}
+
 } // namespace Op2Lib

@@ -153,6 +153,13 @@ public:
     // Enter / Backspace / Esc while drawing. Returns true if consumed.
     bool handleCliffKey(int key);
 
+    // ---- Generated map markers (spawn points and volcanoes). Outpost 2 maps
+    // don't store them, so they are only a guide and are cleared when another
+    // map is loaded or the map is closed.
+    void setGeneratedMarkers(const QVector<QPoint> &spawns, const QVector<QPoint> &volcanoes);
+    const QVector<QPoint> &generatedSpawns() const { return m_genSpawns; }
+    const QVector<QPoint> &generatedVolcanoes() const { return m_genVolcanoes; }
+
     // ---- Enclosed areas
     bool highlightEnclosed() const { return m_highlightOn; }
     void setHighlightEnclosed(bool on);
@@ -267,6 +274,9 @@ private:
     QPoint m_cliffCursor{ -1, -1 };
     int m_cliffSide = 0;
     int m_cliffHeight = 3;
+
+    QVector<QPoint> m_genSpawns;
+    QVector<QPoint> m_genVolcanoes;
 
     bool m_highlightOn = false;
     QVector<QPoint> m_enclosed;

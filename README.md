@@ -22,9 +22,15 @@ Settings are kept in `Mapper3.ini` next to the program.
 
 ## Features
 
-**Current version: 0.7.0**, matching OP2Mapper3 0.7.0: the same tools, menus, messages and settings file.
+**Current version: 0.7.1**, matching OP2Mapper3 0.7.1: the same tools, menus, messages and settings file.
 
-### Terrain tools (via [op2maplib](https://github.com/OutpostUniverse/OP2MappingLib))
+### Map generator (via [op2maplib](https://github.com/OutpostUniverse/OP2MappingLib))
+- **Generate New Map** (File menu, Ctrl+Shift+N) builds a whole map from a seed: size, a template (Plains, Canyon, Desert, Islands, Ice or New Terra), the terrain mix, roughness, minimum biome size, symmetry (mirrored, rotated or four-way), cliffs, rocks and craters, spawn points and volcanoes.
+- **Features:** add valleys (optionally with a lava floor), mountains, plateaus, clearings and chokes, each with a position and size.
+- **Generate** builds the map straight into the main view as a new, unsaved map, with lava-possible areas around volcanoes. **Roll** picks a new seed and generates again; a generated map that hasn't been edited is replaced without asking.
+- Spawn points and volcanoes are marked on the map as a guide (Outpost 2 maps don't store them). The settings are remembered in `Mapper3.ini`.
+
+### Terrain tools (via op2maplib)
 - **Terrain Brush** - paint mud, rock, sand or vegetation; borders blend with the game's own transition tiles. Brush size 3-25 (Ctrl+wheel). **Clean Up Transitions** redoes the transitions across the whole map.
 - **Draw Cliff** - click points (they snap to cliff slopes), choose the high side and a wall height of 3-6, press Enter. Click the first point again for a closed plateau.
 - **Find & Fix Enclosed Areas** - find passable areas units can never reach, highlight them, and make them impassable in one undoable step.
@@ -62,6 +68,7 @@ They snap to each other and to screen edges, remember their positions across mon
 | Keys | Action |
 |---|---|
 | Ctrl+N / Ctrl+O / Ctrl+S | New / open / save map |
+| Ctrl+Shift+N | Generate New Map |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | Ctrl+C / Ctrl+V | Copy an area / paste (Edit Mode) |
 | Ctrl+B | Place the selected tile group (Edit Mode) |

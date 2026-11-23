@@ -104,6 +104,7 @@ public:
     // Changed tiles are accumulated and announced by flushChanges().
     void setMappingIndexAt(int x, int y, int mapping);
     void setCellTypeAt(int x, int y, int cellType);
+    void setLavaPossibleAt(int x, int y, bool possible); // not rendered, no change signal
     void flushChanges();
 
     // Undoable editing.

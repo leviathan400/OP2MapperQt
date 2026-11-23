@@ -8,10 +8,13 @@
 // The test keeps its settings in <out dir>/Mapper3.ini (OP2MAPPER_INI), so a
 // real Mapper3.ini next to the exe is left alone.
 
+#include "BlankMaps.h"
 #include "Editor.h"
+#include "GenerateMapDialog.h"
 #include "MainWindow.h"
 #include "ToolPalette.h"
 
+#include <QAction>
 #include <QPushButton>
 #include "IniFile.h"
 #include "MapDocument.h"
@@ -34,6 +37,7 @@
 #include <QTimer>
 #include <QWidget>
 
+#include <algorithm>
 #include <cstdio>
 
 namespace {
@@ -318,6 +322,73 @@ int main(int argc, char **argv)
         ed.disarmCliff();
     }
 
+    // ---- Map generator
+    {
+        Op2Lib::MapGenRequest req;
+        req.width = 64;
+        req.height = 64;
+        req.seed = 1234;
+        req.spawns = 2;
+        Op2Lib::GeneratedMap a, b;
+        QString gerr;
+        QElapsedTimer gt;
+        gt.start();
+        const bool okA = Op2Lib::generateMap(req, a, gerr);
+        std::printf("      generate 64x64 plains: %lld ms\n", static_cast<long long>(gt.elapsed()));
+        check(okA && a.width == 64 && a.height == 64 && a.tiles.size() == 64u * 64u, "generator: 64x64 plains map");
+        if (!okA)
+            std::printf("      error: %s\n", qPrintable(gerr));
+        check(Op2Lib::generateMap(req, b, gerr) && a.tiles == b.tiles && a.cellTypes == b.cellTypes,
+              "generator: same seed gives the same map");
+        int maxTile = 0;
+        for (uint16_t t : a.tiles)
+            maxTile = std::max(maxTile, static_cast<int>(t));
+        check(maxTile < Op2Lib::standardMappingCount(), "generator: tiles are in the standard mapping table");
+        check(a.spawns.size() == 2, "generator: two spawn points");
+
+        MapDocument gdoc;
+        MapLoadInfo ginfo;
+        QString berr;
+        BlankMaps::ensureExtracted(berr);
+        check(gdoc.load(BlankMaps::pathFor(64, 64), op2, gerr, ginfo) && Op2Lib::applyGeneratedMap(gdoc, a, gerr),
+              "generator: result written into the blank template");
+        bool same = true, bottom = true;
+        for (int y = 0; y < 64; ++y)
+            for (int x = 0; x < 64; ++x)
+                same = same && gdoc.mappingIndexAt(x, y) == a.tiles[static_cast<std::size_t>(y) * 64 + x];
+        for (int x = 0; x < 64; ++x)
+            bottom = bottom && gdoc.cellTypeAt(x, 63) == 6;
+        check(same, "generator: tiles copied exactly");
+        check(bottom, "generator: bottom row Impassable");
+        MapRenderer::renderFullMap(gdoc, 8, MapRenderer::GameMap, MapRenderer::Overlays())
+            .save(QDir(out).filePath(QStringLiteral("generated_plains_64.png")));
+
+        // A bigger one with cliffs, volcanoes and a lava valley.
+        Op2Lib::MapGenRequest big;
+        big.templateName = QStringLiteral("canyon");
+        big.width = 128;
+        big.height = 128;
+        big.seed = 42;
+        big.cliffs = 0.2;
+        big.volcanoes = 2;
+        big.spawns = 2;
+        Op2Lib::MapGenFeature valley;
+        valley.kind = Op2Lib::MapGenFeature::Valley;
+        valley.where = QStringLiteral("nw");
+        valley.lava = true;
+        big.features.append(valley);
+        Op2Lib::GeneratedMap c;
+        gt.restart();
+        const bool okC = Op2Lib::generateMap(big, c, gerr);
+        std::printf("      generate 128x128 canyon, cliffs, volcanoes, lava valley: %lld ms, %d lava zones\n",
+                    static_cast<long long>(gt.elapsed()), static_cast<int>(c.lavaZones.size()));
+        check(okC && !c.lavaZones.isEmpty() && c.plateauShare > 0, "generator: canyon with cliffs and lava zones");
+        MapDocument cdoc;
+        if (cdoc.load(BlankMaps::pathFor(128, 128), op2, gerr, ginfo) && Op2Lib::applyGeneratedMap(cdoc, c, gerr))
+            MapRenderer::renderFullMap(cdoc, 4, MapRenderer::GameMap, MapRenderer::Overlays())
+                .save(QDir(out).filePath(QStringLiteral("generated_canyon_128.png")));
+    }
+
     // ---- Enclosed areas
     QVector<QVector<QPoint>> regions;
     check(Op2Lib::findRegions(doc, regions, err) && !regions.isEmpty(), "passable regions found");
@@ -390,6 +461,38 @@ int main(int argc, char **argv)
         for (ToolPalette *p : ToolPalette::palettes())
             still += p->isVisible() ? 1 : 0;
         check(still == 0, "leaving edit mode hides the palettes");
+
+        // File > Generate New Map > Generate, end to end.
+        QAction *genAct = nullptr;
+        for (QAction *act : win.findChildren<QAction *>())
+            if (act->text() == QStringLiteral("&Generate New Map..."))
+                genAct = act;
+        check(genAct != nullptr, "Generate New Map menu item");
+        if (genAct) {
+            genAct->trigger();
+            QApplication::processEvents();
+            auto *dlg = win.findChild<GenerateMapDialog *>();
+            QPushButton *go = nullptr;
+            if (dlg)
+                for (QPushButton *b : dlg->findChildren<QPushButton *>())
+                    if (b->text() == QStringLiteral("Generate"))
+                        go = b;
+            check(dlg && dlg->isVisible() && go, "generator window opens");
+            if (go) {
+                go->click();
+                QElapsedTimer wt;
+                wt.start();
+                while (!win.windowTitle().contains(QStringLiteral("Generated_")) && wt.elapsed() < 60000)
+                    QApplication::processEvents(QEventLoop::AllEvents, 50);
+                QApplication::processEvents();
+                std::printf("      title: %s\n", qPrintable(win.windowTitle()));
+                check(win.windowTitle().startsWith(QStringLiteral("* OP2Mapper - Generated_plains_1234_128x128")),
+                      "generated map shown as a new, unsaved map");
+                win.grab().save(QDir(out).filePath(QStringLiteral("mainwindow_generated.png")));
+                dlg->grab().save(QDir(out).filePath(QStringLiteral("generate_dialog.png")));
+                dlg->close();
+            }
+        }
         win.hide();
     }
 

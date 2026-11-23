@@ -11,6 +11,8 @@
 #include "CellTypeInfo.h"
 #include "CellTypesWindow.h"
 #include "Editor.h"
+#include "GenerateMapDialog.h"
+#include "Op2Lib.h"
 #include "MapDocument.h"
 #include "MapJsonIO.h"
 #include "MapRenderer.h"
@@ -52,6 +54,7 @@
 #include <QShortcut>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QUndoStack>
 #include <QUrl>
 #include <QWindow>
 
@@ -144,6 +147,8 @@ void MainWindow::buildMenus()
     QMenu *file = menuBar()->addMenu(tr("&File"));
     QAction *a = file->addAction(tr("&New Map"), this, &MainWindow::onNewMap);
     a->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
+    a = file->addAction(tr("&Generate New Map..."), this, &MainWindow::onGenerateMap);
+    a->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N));
     a = file->addAction(tr("&Open Map"), this, &MainWindow::onOpenMap);
     a->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_O));
     m_recentMenu = file->addMenu(tr("Recent Files"));
@@ -558,6 +563,7 @@ bool MainWindow::loadMapFile(const QString &path, bool includeInRecent)
         m_editor->setEditMode(false);
     QString err;
     MapLoadInfo info;
+    m_generatedMapShown = false;
     if (!m_doc->load(path, Settings::op2Path(), err, info)) {
         AppLog::write(QStringLiteral("Map"), QStringLiteral("Could not open %1: %2").arg(QDir::toNativeSeparators(path), err));
         QMessageBox::critical(this, tr("Error"), tr("Error loading map: %1").arg(err));
@@ -653,6 +659,7 @@ void MainWindow::onCloseMap()
         return;
     }
     m_editor->onMapClosed();
+    m_generatedMapShown = false;
     m_doc->reset();
     m_view->documentReplaced();
     m_miniMap->clearThumbnail();
@@ -733,6 +740,90 @@ bool MainWindow::createNewMap(const NewMapDialog::Result &r)
 }
 
 // "Recent Files": up to five, "N. file.map", the prompt runs before the missing-file check.
+// File > Generate New Map: opens the generator window (or brings it forward).
+void MainWindow::onGenerateMap()
+{
+    if (!Op2Lib::profile()) {
+        QMessageBox::warning(this, tr("Generate New Map"),
+            tr("The map generator needs op2maplib, which couldn't be loaded:\n%1").arg(Op2Lib::profileError()));
+        return;
+    }
+    if (!ensureOp2Folder())
+        return;
+    if (!m_generateDialog) {
+        GenerateMapDialog::Host host;
+        host.isUntouchedGeneratedMap = [this] { return isUntouchedGeneratedMap(); };
+        host.confirmDiscardChanges = [this] { return confirmDiscardChanges(); };
+        host.showGeneratedMap = [this](const Op2Lib::GeneratedMap &gen, const QString &fileName) {
+            return showGeneratedMap(gen, fileName);
+        };
+        m_generateDialog = new GenerateMapDialog(host, this);
+    }
+    if (m_generateDialog->isMinimized())
+        m_generateDialog->showNormal();
+    m_generateDialog->show();
+    m_generateDialog->raise();
+    m_generateDialog->activateWindow();
+}
+
+// True when the open map is the last generated one and hasn't been edited, so
+// generating again may replace it without asking.
+bool MainWindow::isUntouchedGeneratedMap() const
+{
+    return m_generatedMapShown && m_doc->isLoaded() && m_doc->undoStack()->count() == 0 && !m_doc->strokeOpen();
+}
+
+// Shows a generated map in the main view as a new, unsaved map called fileName
+// (in the default map folder): the blank template of the same size is loaded
+// (its mapping table is the generator's standard table) and the result is
+// written into it. The unsaved-changes question was already asked by the
+// dialog. Returns false if nothing changed (the reason has been shown).
+bool MainWindow::showGeneratedMap(const Op2Lib::GeneratedMap &gen, const QString &fileName)
+{
+    const bool replacingOwn = isUntouchedGeneratedMap();
+    // Keep the view when replacing a generated map of the same size, so trying
+    // seeds doesn't jump the view back each time.
+    const bool keepView = replacingOwn && m_doc->widthTiles() == gen.width && m_doc->heightTiles() == gen.height;
+    const MapView::ViewState view = m_view->viewState();
+
+    QString err;
+    BlankMaps::ensureExtracted(err);
+    const QString blank = BlankMaps::pathFor(gen.width, gen.height);
+    if (blank.isEmpty()) {
+        QMessageBox::critical(this, tr("Generate New Map"),
+            tr("There's no blank map template for %1 x %2.").arg(gen.width).arg(gen.height)
+                + (err.isEmpty() ? QString() : QLatin1Char('\n') + err));
+        return false;
+    }
+    if (!loadMapFile(blank, false))
+        return false;
+    if (!Op2Lib::applyGeneratedMap(*m_doc, gen, err)) {
+        QMessageBox::critical(this, tr("Generate New Map"), tr("The generated map couldn't be used: %1").arg(err));
+        return false;
+    }
+    m_editor->setGeneratedMarkers(gen.spawns, gen.volcanoes);
+
+    QString working = Settings::workingPath();
+    if (working.isEmpty())
+        working = Settings::op2Path();
+    m_doc->setCurrentPath(QDir(working).filePath(fileName));
+    m_doc->markNewUnsaved();
+    m_generatedMapShown = true;
+
+    if (keepView)
+        m_view->setViewState(view);
+    else
+        m_view->fitMapToView();
+    updateZoomLabel();
+    if (m_miniMap->isVisible())
+        m_miniMap->refreshThumbnail();
+    refreshSidebarMap();
+    updateTileInfo();
+    updateTitle();
+    updateStatus();
+    return true;
+}
+
 void MainWindow::rebuildRecentMenu()
 {
     m_recentMenu->clear();
@@ -797,6 +888,7 @@ void MainWindow::onImportJson()
         return;
     if (m_editor->editMode())
         m_editor->setEditMode(false);
+    m_generatedMapShown = false;
     QString msg;
     MapLoadInfo info;
     if (!MapJsonIO::importFromJson(path, *m_doc, Settings::op2Path(), info, msg)) {

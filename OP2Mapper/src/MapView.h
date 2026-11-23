@@ -28,6 +28,15 @@ public:
     void resetView();
     void panToCenterTile(int tx, int ty);
 
+    // Zoom and offset, to keep the view when a generated map is replaced by
+    // another of the same size.
+    struct ViewState { double zoom; int offsetX; int offsetY; };
+    ViewState viewState() const { return { m_zoom, m_offsetX, m_offsetY }; }
+    void setViewState(const ViewState &v);
+    // The largest of 100/75/50/25/10% that shows the whole map, centred
+    // (a newly generated map is seen at once).
+    void fitMapToView();
+
     // Visible area in fractional tiles (for the mini map).
     QRectF visibleTileRect() const;
     QPoint tileAt(const QPoint &widgetPos) const;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(OP2Mapper VERSION 0.7.0 LANGUAGES CXX)
+project(OP2Mapper VERSION 0.7.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,8 @@ add_library(op2mapper_core STATIC
     src/CellTypesWindow.cpp
     src/Editor.h
     src/Editor.cpp
+    src/GenerateMapDialog.h
+    src/GenerateMapDialog.cpp
     src/IniFile.h
     src/IniFile.cpp
     src/JsonWriter.h

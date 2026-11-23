@@ -30,6 +30,7 @@ OP2MapperQt/
         ├── Sidebar             # right-hand info panel (fMain sidebar)
         ├── SettingsDialog      # File > Settings and Help > About (fSettings, fAbout)
         ├── NewMapDialog        # File > New Map (fNewMap)
+        ├── GenerateMapDialog   # File > Generate New Map (fGenerateMap)
         │   ── Editing ──
         ├── Editor              # tool/mode state machine (GlobalVariables + fMain partials)
         ├── MapView             # map panel: zoom, pan, overlays, mouse input (fMain.MapPanel)
@@ -133,7 +134,14 @@ Dirty state comes from the undo stack's clean index. `markNewUnsaved()` makes th
 
 ### 3.5 op2maplib (`Op2Lib.h/.cpp`)
 
-The app builds op2maplib 0.3.4. Its map generator (`om_mapgen_*`) is compiled in but not used by the app yet.
+The app builds op2maplib 0.3.4.
+
+**Map generator** (`Op2Lib::generateMap`, `GenerateMapDialog`, `MainWindow::showGeneratedMap`; OP2Mapper3 `fGenerateMap` + `fMain.Generate`):
+
+- The dialog collects the settings (stored in `Mapper3.ini [GenerateMap]`) and runs `om_mapgen_generate` on a worker thread; the shared profile is only read there.
+- The result's tiles index the profile's standard mapping table. The blank template of the same size uses that table, so `showGeneratedMap` loads the template and `Op2Lib::applyGeneratedMap` writes every tile, cell type and lava-possible flag into it directly (the starting state, not an undo step), with the bottom row Impassable. The map is named `Generated_<template>_<seed>_<W>x<H>.map` in WorkingPath and marked unsaved.
+- Generating again replaces the previous result without asking while it is untouched (nothing in the undo stack); otherwise the usual unsaved-changes prompt runs first. The view is kept when the size is the same, else fitted to the window.
+- Spawn points and volcanoes are kept in the Editor and drawn by MapView as markers; they are cleared when another map is loaded.
 
 - **Profile:** loaded once, on first use.
 - **Blend maps:** a fresh `BlendMap` is built from the current map for each brush stroke, each Clean Up Transitions and each cliff, so it never needs syncing with other edits.
@@ -145,7 +153,7 @@ The app builds op2maplib 0.3.4. Its map generator (`om_mapgen_*`) is compiled in
 | File | Where | Contents |
 |---|---|---|
 | `.map` | anywhere | the document (OP2Utility format) |
-| `Mapper3.ini` | next to the exe | `[Paths]` OP2Path, WorkingPath, Tilegroups; `[Window]` recent files, window and palette positions, always-on-top flags, paste / Tile Selection / terrain settings. Same rules as OP2Mapper3, so both apps can share it. |
+| `Mapper3.ini` | next to the exe | `[Paths]` OP2Path, WorkingPath, Tilegroups; `[Window]` recent files, window and palette positions, always-on-top flags, paste / Tile Selection / terrain settings; `[GenerateMap]` the map generator's settings. Same rules as OP2Mapper3, so both apps can share it. |
 | `OP2Mapper.log` | next to the exe | start / stop, maps opened and saved, launcher installs, op2maplib status; rolled to `OP2Mapper.old.log` past 1 MB |
 | Blank templates | `<exe>/BlankMaps` or `%LOCALAPPDATA%/OP2Mapper/BlankMaps` | extracted from the resources for New Map |
 | Tile groups | `<Tilegroups>/<folder>/<name>.json` (+ `.bmp`) | reusable stamps of mapping indices; exports go to `Exported/` |

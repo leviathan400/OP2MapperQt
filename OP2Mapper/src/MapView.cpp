@@ -137,6 +137,41 @@ void MapView::panToCenterTile(int tx, int ty)
 }
 
 // Visible area in fractional tiles (the mini map's yellow box).
+void MapView::setViewState(const ViewState &v)
+{
+    m_zoom = v.zoom;
+    m_offsetX = v.offsetX;
+    m_offsetY = v.offsetY;
+    rebuildCache();
+    clampOffsets();
+    emit zoomChanged(m_zoom);
+    emit viewportChanged();
+    update();
+}
+
+void MapView::fitMapToView()
+{
+    if (!m_doc->isLoaded())
+        return;
+    constexpr double steps[] = { 1.0, 0.75, 0.5, 0.25, 0.1 };
+    m_zoom = steps[std::size(steps) - 1];
+    for (double s : steps) {
+        const int px = std::max(1, static_cast<int>(std::lround(T * s)));
+        if (m_doc->widthTiles() * px <= width() && m_doc->heightTiles() * px <= height()) {
+            m_zoom = s;
+            break;
+        }
+    }
+    const int s = tilePx();
+    m_offsetX = (width() - m_doc->widthTiles() * s) / 2;
+    m_offsetY = (height() - m_doc->heightTiles() * s) / 2;
+    rebuildCache();
+    clampOffsets();
+    emit zoomChanged(m_zoom);
+    emit viewportChanged();
+    update();
+}
+
 QRectF MapView::visibleTileRect() const
 {
     const double s = tilePx();
@@ -371,6 +406,43 @@ void MapView::paintOverlays(QPainter &p, const QRect &visibleTiles)
             if (i == 0 && pts.size() > 1)
                 p.drawRect(box.adjusted(4, 4, -4, -4));
         }
+    }
+
+    // Spawn points (white, numbered) and volcanoes (orange-red) of a generated
+    // map: circles 3 tiles in radius (at least 10 px), with a black shadow.
+    if (!m_editor->generatedSpawns().isEmpty() || !m_editor->generatedVolcanoes().isEmpty()) {
+        const double radius = std::max(10.0, 3.0 * s);
+        auto centre = [&](const QPoint &t) {
+            return QPointF(m_offsetX + (t.x() + 0.5) * s, m_offsetY + (t.y() + 0.5) * s);
+        };
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setBrush(Qt::NoBrush);
+        QFont f(QStringLiteral("Segoe UI"));
+        f.setPixelSize(12);
+        f.setBold(true);
+        p.setFont(f);
+        const auto &spawns = m_editor->generatedSpawns();
+        for (int i = 0; i < spawns.size(); ++i) {
+            const QPointF c = centre(spawns[i]);
+            p.setPen(QPen(Qt::black, 4));
+            p.drawEllipse(c, radius, radius);
+            p.setPen(QPen(Qt::white, 2));
+            p.drawEllipse(c, radius, radius);
+            const QString label = QStringLiteral("S%1").arg(i + 1);
+            const QRectF box(c.x() - 30, c.y() - 15, 60, 30);
+            p.setPen(Qt::black);
+            p.drawText(box.translated(1, 1), Qt::AlignCenter, label);
+            p.setPen(Qt::white);
+            p.drawText(box, Qt::AlignCenter, label);
+        }
+        for (const QPoint &v : m_editor->generatedVolcanoes()) {
+            const QPointF c = centre(v);
+            p.setPen(QPen(Qt::black, 4));
+            p.drawEllipse(c, radius, radius);
+            p.setPen(QPen(QColor(255, 69, 0), 2));
+            p.drawEllipse(c, radius, radius);
+        }
+        p.setRenderHint(QPainter::Antialiasing, false);
     }
 
     // Selected tile box

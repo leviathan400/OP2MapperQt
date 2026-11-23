@@ -268,6 +268,14 @@ void MapDocument::setCellTypeAt(int x, int y, int cellType)
     noteChanged(x, y);
 }
 
+// Lava-possible flag (set by the map generator around volcanoes). Raw write.
+void MapDocument::setLavaPossibleAt(int x, int y, bool possible)
+{
+    if (!inBounds(x, y))
+        return;
+    m_map->SetLavaPossible(possible, static_cast<std::size_t>(x), static_cast<std::size_t>(y));
+}
+
 void MapDocument::flushChanges()
 {
     if (m_pending.isNull())

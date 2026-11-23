@@ -3,6 +3,7 @@
 #include "MapDocument.h"
 
 #include <QColor>
+#include <QPair>
 #include <QPoint>
 #include <QString>
 #include <QVector>
@@ -75,5 +76,69 @@ std::vector<TileChange> toTileChanges(const MapDocument &doc,
 bool findRegions(const MapDocument &doc, QVector<QVector<QPoint>> &regions, QString &error);
 
 QString libraryVersion();
+
+// ---- Map generator (om_mapgen_*) ---------------------------------------------
+
+// One terrain feature for the generator.
+struct MapGenFeature {
+    enum Kind { Valley = 0, Mountain, Plateau, Clearing, Choke };
+    int kind = Valley;
+    QString where; // sector "nw", "n", "no", "w", "c", "o", "sw", "s", "so"; "" = random
+    QString to;    // valley / choke end sector; "" = opposite of `where`
+    double size = 0.5; // 0..1
+    bool lava = false; // valley only
+};
+
+// Everything the generator needs (OP2Mapper3 fGenerateMap's request).
+struct MapGenRequest {
+    QString templateName = QStringLiteral("plains");
+    int width = 128;
+    int height = 128;
+    quint64 seed = 1234;
+    QVector<QPair<QString, double>> mix; // empty = the template's own mix
+    double roughness = 0.5;
+    double minBiome = 0.006;
+    int symmetry = 0;      // om_mapgen_symmetry
+    double cliffs = 0;
+    double details = 0.5;
+    int spawns = 2;
+    int volcanoes = 0;
+    QVector<MapGenFeature> features;
+};
+
+// A generated map. Tiles are indices into the profile's standard mapping
+// table; tiles and cell types are row-major.
+struct GeneratedMap {
+    int width = 0;
+    int height = 0;
+    std::vector<uint16_t> tiles;
+    std::vector<uint8_t> cellTypes;
+    QVector<QPoint> spawns;
+    QVector<QPoint> volcanoes;
+    QVector<QVector<QPoint>> lavaZones;
+    double passableShare = 0;
+    double plateauShare = 0;
+    bool connected = false;
+    QVector<double> groundShares; // indexed by profile ground
+};
+
+// A template's default for a numeric setting (e.g. "roughness", "volcanoes").
+double mapGenTemplateDefault(const QString &templateName, const QString &key);
+
+// Number of entries in the profile's standard mapping table (0 if none).
+int standardMappingCount();
+
+QString groundName(int ground);
+
+// Runs the generator. Safe to call from a worker thread (it only reads the
+// shared profile). Returns false with an error message on failure.
+bool generateMap(const MapGenRequest &request, GeneratedMap &out, QString &error);
+
+// Writes a generated map into a document holding the blank template of the
+// same size (whose mapping table is the profile's standard table): tiles,
+// cell types and lava-possible zones, bottom row Impassable. Written
+// directly, not as an undo step (it is the new map's starting state).
+// Returns false with an error if the sizes or mapping tables don't match.
+bool applyGeneratedMap(MapDocument &doc, const GeneratedMap &gen, QString &error);
 
 } // namespace Op2Lib
