@@ -12,7 +12,8 @@
 //   - read failures return the default; write failures are ignored
 namespace IniFile {
 
-// <exe dir>/Mapper3.ini
+// <exe dir>/Mapper3.ini, or the file named by the OP2MAPPER_INI environment
+// variable when it is set.
 QString path();
 
 QString value(const QString &section, const QString &key,

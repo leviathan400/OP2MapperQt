@@ -133,6 +133,8 @@ Dirty state comes from the undo stack's clean index. `markNewUnsaved()` makes th
 
 ### 3.5 op2maplib (`Op2Lib.h/.cpp`)
 
+The app builds op2maplib 0.3.4. Its map generator (`om_mapgen_*`) is compiled in but not used by the app yet.
+
 - **Profile:** loaded once, on first use.
 - **Blend maps:** a fresh `BlendMap` is built from the current map for each brush stroke, each Clean Up Transitions and each cliff, so it never needs syncing with other edits.
 - **Changes:** results come back as `om_change` records and become one `TileChangesCommand`. Suggested cell types are applied except on the locked bottom row.
@@ -158,7 +160,7 @@ Dirty state comes from the undo stack's clean index. `markNewUnsaved()` makes th
 
 ## 6. Testing
 
-There is no unit-test framework. `tests/selftest.cpp` (CMake option `OP2MAPPER_BUILD_SELFTEST`) drives the real `Editor`, `MapDocument`, `MapView` and `MainWindow` headlessly against an Outpost 2 install. It writes the Outpost 2 folder into the `Mapper3.ini` next to the test exe, answers message boxes automatically, and writes rendered images to check by eye. Run it with `QT_QPA_PLATFORM=offscreen` (and `QT_QPA_FONTDIR` pointing at a font folder so text renders).
+There is no unit-test framework. `tests/selftest.cpp` (CMake option `OP2MAPPER_BUILD_SELFTEST`) drives the real `Editor`, `MapDocument`, `MapView` and `MainWindow` headlessly against an Outpost 2 install. It keeps its own `Mapper3.ini` in the output folder (via the `OP2MAPPER_INI` environment variable, which overrides the INI location), writes the Outpost 2 folder into it, answers message boxes automatically, and writes rendered images to check by eye. Run it with `QT_QPA_PLATFORM=offscreen` (and `QT_QPA_FONTDIR` pointing at a font folder so text renders).
 
 ### Continuous integration and releases
 

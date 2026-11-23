@@ -75,8 +75,13 @@ bool find(const QStringList &lines, const QString &section, const QString &key,
 
 namespace IniFile {
 
+// <exe dir>/Mapper3.ini. OP2MAPPER_INI overrides it (the self-test uses its
+// own file so it never touches a real Mapper3.ini).
 QString path()
 {
+    const QString override = qEnvironmentVariable("OP2MAPPER_INI");
+    if (!override.isEmpty())
+        return override;
     return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("Mapper3.ini"));
 }
 

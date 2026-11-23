@@ -25,7 +25,7 @@ on:
 env:
   QT_VERSION: '6.10.1'
   OP2UTILITY_REF: 7be4bbd1061f7ff2438fc3961c78b1a8b66ce6c1
-  OP2MAPPINGLIB_REF: 3091881a25b2be1b065c0a24a74734c146c8c236  # v0.3.0
+  OP2MAPPINGLIB_REF: 839b6a39d9a11fad2a8a7843aa8a291b3ecf5e7f  # v0.3.4 (+ credits and docs)
 
 jobs:
   build:
