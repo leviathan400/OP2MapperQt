@@ -13,7 +13,7 @@ inline constexpr const char *Name = "OP2Mapper";
 inline constexpr const char *DisplayName = "OP2MapperQt"; // splash and About
 inline constexpr const char *Version = OP2MAPPERQT_VERSION;
 // The OP2Mapper3 release this port matches feature for feature.
-inline constexpr const char *PortedFrom = "OP2Mapper3 0.7.1 (build 0155)";
+inline constexpr const char *PortedFrom = "OP2Mapper3 0.7.2 (build 0155)";
 inline constexpr const char *Description =
     "A powerful map editor for Outpost 2: Divided Destiny.";
 inline constexpr const char *Website = "https://github.com/leviathan400/OP2MapperQt";

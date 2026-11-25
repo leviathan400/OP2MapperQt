@@ -22,7 +22,7 @@ Settings are kept in `Mapper3.ini` next to the program.
 
 ## Features
 
-**Current version: 0.7.1**, matching OP2Mapper3 0.7.1: the same tools, menus, messages and settings file.
+**Current version: 0.7.2**, matching OP2Mapper3 0.7.2: the same tools, menus, messages and settings file.
 
 ### Map generator (via [OP2MappingLib](https://github.com/OutpostUniverse/OP2MappingLib))
 - **Generate New Map** (File menu, Ctrl+Shift+N) builds a whole map from a seed: size, a template (Plains, Canyon, Desert, Islands, Ice or New Terra), the terrain mix, roughness, minimum biome size, symmetry (mirrored, rotated or four-way), cliffs, rocks and craters, spawn points and volcanoes.
