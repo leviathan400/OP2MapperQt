@@ -24,13 +24,13 @@ Settings are kept in `Mapper3.ini` next to the program.
 
 **Current version: 0.7.1**, matching OP2Mapper3 0.7.1: the same tools, menus, messages and settings file.
 
-### Map generator (via [op2maplib](https://github.com/OutpostUniverse/OP2MappingLib))
+### Map generator (via [OP2MappingLib](https://github.com/OutpostUniverse/OP2MappingLib))
 - **Generate New Map** (File menu, Ctrl+Shift+N) builds a whole map from a seed: size, a template (Plains, Canyon, Desert, Islands, Ice or New Terra), the terrain mix, roughness, minimum biome size, symmetry (mirrored, rotated or four-way), cliffs, rocks and craters, spawn points and volcanoes.
 - **Features:** add valleys (optionally with a lava floor), mountains, plateaus, clearings and chokes, each with a position and size.
 - **Generate** builds the map straight into the main view as a new, unsaved map, with lava-possible areas around volcanoes. **Roll** picks a new seed and generates again; a generated map that hasn't been edited is replaced without asking.
 - Spawn points and volcanoes are marked on the map as a guide (Outpost 2 maps don't store them). The settings are remembered in `Mapper3.ini`.
 
-### Terrain tools (via op2maplib)
+### Terrain tools (via OP2MappingLib)
 - **Terrain Brush** - paint mud, rock, sand or vegetation; borders blend with the game's own transition tiles. Brush size 3-25 (Ctrl+wheel). **Clean Up Transitions** redoes the transitions across the whole map.
 - **Draw Cliff** - click points (they snap to cliff slopes), choose the high side and a wall height of 3-6, press Enter. Click the first point again for a closed plateau.
 - **Find & Fix Enclosed Areas** - find passable areas units can never reach, highlight them, and make them impassable in one undoable step.
@@ -116,7 +116,11 @@ QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR=C:/Windows/Fonts op2mapper_selftest "<O
 ## Related Projects
 
 - [OP2Mapper3](https://github.com/leviathan400/OP2Mapper) - The VB.net map editor this port is based on
-- [OP2MappingLib](https://github.com/OutpostUniverse/OP2MappingLib) - op2maplib: terrain blending, cliffs and passable regions
+- [OP2MappingLib](https://github.com/OutpostUniverse/OP2MappingLib) - terrain blending, cliffs, passable regions and the map generator
 - [OP2TileGroupTools](https://github.com/leviathan400/OP2TileGroupTools) - Tile group JSON format reference
 - [OP2MapJsonTools](https://github.com/leviathan400/OP2MapJsonToolsLibrary) - Map <-> JSON shared library
 - [OP2Utility](https://github.com/OutpostUniverse/OP2Utility) - C++ library for working with OP2 files
+
+## Credits
+
+The terrain blending, cliff tools and map generator come from [OP2MappingLib](https://github.com/OutpostUniverse/OP2MappingLib), which is largely **fefi-byte's** work, ported from [op2-codegen-editor](https://github.com/fefi-byte/op2-codegen-editor). Thank you, fefi-byte!

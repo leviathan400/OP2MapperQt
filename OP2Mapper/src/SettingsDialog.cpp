@@ -180,8 +180,14 @@ void showAboutDialog(QWidget *parent)
                                .arg(QString::fromLatin1(qVersion()), QString::fromLatin1(AppInfo::PortedFrom)), &dlg);
     ver->setGeometry(22, 170, 600, 22);
     auto *desc = new QLabel(QString::fromLatin1(AppInfo::Description), &dlg);
-    desc->setGeometry(22, 200, 618, 40);
+    desc->setGeometry(22, 200, 618, 22);
     desc->setWordWrap(true);
+    // Terrain tools and map generator credit (OP2MappingLib, largely fefi-byte's work).
+    auto *credit = new QLabel(QObject::tr("Terrain tools and map generator: "
+        "<a href=\"https://github.com/OutpostUniverse/OP2MappingLib\">OP2MappingLib</a>, "
+        "based on fefi-byte's <a href=\"https://github.com/fefi-byte/op2-codegen-editor\">op2-codegen-editor</a>"), &dlg);
+    credit->setGeometry(22, 226, 618, 18);
+    credit->setOpenExternalLinks(true);
     auto *copy = new QLabel(QString::fromUtf8(AppInfo::Copyright), &dlg);
     copy->setStyleSheet(QStringLiteral("color: gray;"));
     copy->setGeometry(22, 250, 600, 18);

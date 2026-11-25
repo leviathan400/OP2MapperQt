@@ -12,6 +12,7 @@
 #include "Editor.h"
 #include "GenerateMapDialog.h"
 #include "MainWindow.h"
+#include "SettingsDialog.h"
 #include "ToolPalette.h"
 
 #include <QAction>
@@ -494,6 +495,20 @@ int main(int argc, char **argv)
             }
         }
         win.hide();
+    }
+
+    // ---- About dialog (layout screenshot)
+    {
+        bool shown = false;
+        QTimer::singleShot(300, [&] {
+            if (QWidget *w = QApplication::activeModalWidget()) {
+                shown = w->windowTitle() == QStringLiteral("About OP2MapperQt");
+                w->grab().save(QDir(out).filePath(QStringLiteral("about.png")));
+                w->close();
+            }
+        });
+        showAboutDialog(nullptr);
+        check(shown, "About dialog opens");
     }
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
