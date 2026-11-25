@@ -1,5 +1,4 @@
-# ---- Third-party (cloned separately by contributors) ----
-/OP2Utility/
+# OP2Utility and OP2MappingLib are git submodules (see .gitmodules).
 
 # ---- Build directories ----
 build/

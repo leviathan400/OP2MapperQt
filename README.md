@@ -89,17 +89,21 @@ OP2MapperQt.exe [/op2dir "C:\Games\Outpost 2"] [map file]
 
 ## Building
 
-Qt 6 (Widgets, Network) and CMake 3.16+. Two libraries are needed:
+Qt 6 (Widgets, Network) and CMake 3.16+. The two libraries the app needs are git submodules, so clone with `--recursive`:
 
-- [OP2Utility](https://github.com/OutpostUniverse/OP2Utility) in `OP2Utility/` at the top of this repository (map and tileset file I/O)
-- [OP2MappingLib](https://github.com/OutpostUniverse/OP2MappingLib) (op2maplib) checked out beside this repository as `OP2MappingLib/` or `op2maplib/`, or passed with `-DOP2MAPLIB_DIR=<path>`. It is built as a static library and its blend profile is embedded in the program.
+- [OP2Utility](https://github.com/OutpostUniverse/OP2Utility) in `OP2Utility/` (map and tileset file I/O). Its repository has no CMake files; the app's CMake builds its sources directly.
+- [OP2MappingLib](https://github.com/OutpostUniverse/OP2MappingLib) in `OP2MappingLib/` (terrain blending, cliffs, enclosed areas and the map generator). It is built as a static library and its blend profile is embedded in the program.
 
 ```
+git clone --recursive https://github.com/leviathan400/OP2MapperQt.git
+cd OP2MapperQt
 cmake -S OP2Mapper -B build -DCMAKE_PREFIX_PATH=<path-to-Qt>
 cmake --build build
 ```
 
-Every push is built on Windows (MSVC), Linux (GCC) and macOS (Clang) by GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)), which checks out OP2Utility and OP2MappingLib at pinned commits. Each run keeps ready-to-run packages (Windows zip, macOS app bundle, Linux AppImage). Pushing a `v*` tag also creates a draft release with them attached. OP2Utility's upstream repository has no CMake files; the app's CMake builds its sources directly in that case.
+In an existing clone without the libraries, run `git submodule update --init`. A checkout of OP2MappingLib beside the repository (`../OP2MappingLib` or `../op2maplib`) also works, or pass `-DOP2MAPLIB_DIR=<path>`.
+
+Every push is built on Windows (MSVC), Linux (GCC) and macOS (Clang) by GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)), using the submodules' pinned commits. Each run keeps ready-to-run packages (Windows zip, macOS app bundle, Linux AppImage). Pushing a `v*` tag also creates a draft release with them attached.
 
 A headless self-test of the editing core can be built with `-DOP2MAPPER_BUILD_SELFTEST=ON`. It needs an Outpost 2 install, and writes rendered images to the output folder:
 

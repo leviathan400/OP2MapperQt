@@ -1,10 +1,10 @@
 # Builds OP2MapperQt on Windows, Linux and macOS, and publishes releases.
 #
-# The two libraries the app needs are checked out at pinned commits:
-#   OP2Utility    -> OP2MapperQt/OP2Utility   (upstream has no CMake files;
-#                    OP2Mapper/CMakeLists.txt builds its sources directly)
-#   OP2MappingLib -> OP2MappingLib, beside the repository (op2maplib)
-# Bump the *_REF values below to build against newer versions.
+# The two libraries the app needs are git submodules, pinned in the repo:
+#   OP2Utility/     upstream has no CMake files; OP2Mapper/CMakeLists.txt
+#                   builds its sources directly
+#   OP2MappingLib/  op2maplib
+# To build against newer versions, move the submodules and commit.
 #
 # Every run uploads ready-to-run packages as artifacts:
 #   Windows  OP2MapperQt-<ver>-Windows-x64.zip   (windeployqt + MSVC runtime)
@@ -24,8 +24,6 @@ on:
 
 env:
   QT_VERSION: '6.10.1'
-  OP2UTILITY_REF: 7be4bbd1061f7ff2438fc3961c78b1a8b66ce6c1
-  OP2MAPPINGLIB_REF: 839b6a39d9a11fad2a8a7843aa8a291b3ecf5e7f  # v0.3.4 (+ credits and docs)
 
 jobs:
   build:
@@ -46,24 +44,11 @@ jobs:
             qt_arch: clang_64
 
     steps:
-      - name: Check out OP2MapperQt
+      - name: Check out OP2MapperQt with its submodules
         uses: actions/checkout@v5
         with:
           path: OP2MapperQt
-
-      - name: Check out OP2Utility
-        uses: actions/checkout@v5
-        with:
-          repository: OutpostUniverse/OP2Utility
-          ref: ${{ env.OP2UTILITY_REF }}
-          path: OP2MapperQt/OP2Utility
-
-      - name: Check out OP2MappingLib
-        uses: actions/checkout@v5
-        with:
-          repository: OutpostUniverse/OP2MappingLib
-          ref: ${{ env.OP2MAPPINGLIB_REF }}
-          path: OP2MappingLib
+          submodules: recursive
 
       - name: Package version
         shell: bash

@@ -14,12 +14,18 @@ include(GNUInstallDirs)
 
 set(OP2UTIL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../OP2Utility" CACHE PATH "Path to OP2Utility checkout")
 # op2maplib lives in the OP2MappingLib repository
-# (https://github.com/OutpostUniverse/OP2MappingLib), checked out next to
-# this repository as "op2maplib" or "OP2MappingLib".
-set(_op2maplib_default "${CMAKE_CURRENT_SOURCE_DIR}/../../op2maplib")
-if(NOT EXISTS "${_op2maplib_default}/CMakeLists.txt" AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../OP2MappingLib/CMakeLists.txt")
-    set(_op2maplib_default "${CMAKE_CURRENT_SOURCE_DIR}/../../OP2MappingLib")
-endif()
+# (https://github.com/OutpostUniverse/OP2MappingLib). Looked for, in order:
+#   <repo>/OP2MappingLib            the git submodule
+#   ../op2maplib, ../OP2MappingLib   a checkout beside this repository
+set(_op2maplib_default "${CMAKE_CURRENT_SOURCE_DIR}/../OP2MappingLib")
+foreach(_candidate "${CMAKE_CURRENT_SOURCE_DIR}/../OP2MappingLib"
+                   "${CMAKE_CURRENT_SOURCE_DIR}/../../op2maplib"
+                   "${CMAKE_CURRENT_SOURCE_DIR}/../../OP2MappingLib")
+    if(EXISTS "${_candidate}/CMakeLists.txt")
+        set(_op2maplib_default "${_candidate}")
+        break()
+    endif()
+endforeach()
 set(OP2MAPLIB_DIR "${_op2maplib_default}" CACHE PATH "Path to the op2maplib checkout (OP2MappingLib)")
 
 # Everything but main.cpp, shared by the app and the self-test.
@@ -112,7 +118,9 @@ endif()
 # Built as a static library so the app needs no extra DLL; its blend
 # profile (profiles/op2.json) is embedded as :/op2maplib/op2.json.
 if(NOT EXISTS "${OP2MAPLIB_DIR}/CMakeLists.txt")
-    message(FATAL_ERROR "op2maplib not found at ${OP2MAPLIB_DIR}. Clone https://github.com/OutpostUniverse/OP2MappingLib next to this repository or set -DOP2MAPLIB_DIR=<path>.")
+    message(FATAL_ERROR "op2maplib not found at ${OP2MAPLIB_DIR}. In a git clone run "
+                        "'git submodule update --init', or clone https://github.com/OutpostUniverse/OP2MappingLib "
+                        "next to this repository, or set -DOP2MAPLIB_DIR=<path>.")
 endif()
 set(OP2MAPLIB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(OP2MAPLIB_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -146,8 +154,9 @@ elseif(EXISTS "${OP2UTIL_DIR}/OP2Utility/src")
         "${OP2UTIL_DIR}/OP2Utility/src")
     target_compile_features(OP2Utility PUBLIC cxx_std_20)
 else()
-    message(FATAL_ERROR "OP2Utility not found at ${OP2UTIL_DIR}. Clone "
-                        "https://github.com/OutpostUniverse/OP2Utility there or set -DOP2UTIL_DIR=<path>.")
+    message(FATAL_ERROR "OP2Utility not found at ${OP2UTIL_DIR}. In a git clone run "
+                        "'git submodule update --init', or clone https://github.com/OutpostUniverse/OP2Utility "
+                        "there, or set -DOP2UTIL_DIR=<path>.")
 endif()
 message(STATUS "OP2Utility: ${OP2UTIL_DIR}")
 target_link_libraries(op2mapper_core PUBLIC OP2Utility)

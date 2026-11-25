@@ -11,7 +11,8 @@ OP2MapperQt/
 ├── README.md, ARCHITECTURE.md
 ├── docs/OP2MapperQt.png        # README screenshot
 ├── .github/workflows/build.yml # CI: Windows, Linux and macOS builds
-├── OP2Utility/                 # OP2Utility C++ library (map, tileset and archive I/O)
+├── OP2Utility/                 # submodule: OP2Utility C++ library (map, tileset and archive I/O)
+├── OP2MappingLib/              # submodule: op2maplib (terrain, cliffs, regions, map generator)
 └── OP2Mapper/
     ├── CMakeLists.txt          # op2mapper_core library + the OP2MapperQt program (+ optional self-test)
     ├── main.cpp                # single instance, log, splash, main window
@@ -61,7 +62,9 @@ OP2MapperQt/
 External libraries:
 
 - **OP2Utility** reads and writes `.map` files and tileset bitmaps. The app reads and writes map files through `QFile` and OP2Utility's memory streams, so paths with non-ASCII characters work.
-- **op2maplib** (OP2MappingLib) does terrain blending, cliffs and passable-region analysis. It is built as a static library from its own CMake project; its blend profile `profiles/op2.json` is embedded as `:/op2maplib/op2.json`.
+- **op2maplib** (OP2MappingLib) does terrain blending, cliffs, passable-region analysis and map generation. It is built as a static library from its own CMake project; its blend profile `profiles/op2.json` is embedded as `:/op2maplib/op2.json`.
+
+In the GitHub repository both libraries are git submodules, pinned to specific commits. `OP2Mapper/CMakeLists.txt` uses OP2Utility's own CMake files if it has them and otherwise builds its sources directly (upstream has none). It looks for OP2MappingLib in the repository's `OP2MappingLib/` first, then beside the repository (`../op2maplib`, `../OP2MappingLib`); `-DOP2UTIL_DIR` and `-DOP2MAPLIB_DIR` override both.
 
 ## 2. How the parts fit
 
@@ -172,7 +175,7 @@ There is no unit-test framework. `tests/selftest.cpp` (CMake option `OP2MAPPER_B
 
 ### Continuous integration and releases
 
-`.github/workflows/build.yml` builds the app on Windows (MSVC), Linux (GCC) and macOS (Clang) with Qt 6.10 on every push and pull request. It checks out OP2Utility into `OP2Utility/` and OP2MappingLib beside the repository, both at pinned commits (`OP2UTILITY_REF`, `OP2MAPPINGLIB_REF`), and uploads ready-to-run packages:
+`.github/workflows/build.yml` builds the app on Windows (MSVC), Linux (GCC) and macOS (Clang) with Qt 6.10 on every push and pull request. It checks the repository out with its submodules (OP2Utility and OP2MappingLib at the commits the repository pins) and uploads ready-to-run packages:
 
 - Windows: `OP2MapperQt-<ver>-Windows-x64.zip`, made with windeployqt plus the MSVC runtime DLLs
 - macOS: `OP2MapperQt-<ver>-macOS-<arch>.zip`, an app bundle made with macdeployqt (not signed)
