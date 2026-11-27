@@ -137,7 +137,7 @@ Dirty state comes from the undo stack's clean index. `markNewUnsaved()` makes th
 
 ### 3.5 op2maplib (`Op2Lib.h/.cpp`)
 
-The app builds op2maplib 0.3.4.
+The app builds op2maplib 0.3.5 (OP2Mapper3 0.7.2 build 0156 uses the same). Maps generated with the same settings and seed are the same as with 0.3.4. Not used yet: 0.3.5's mountains, plateaus and gorges settings and the learned generator (`om_mapgen_generate_learned`, which needs `profiles/op2-net.bin`); OP2Mapper3 doesn't use them either.
 
 **Map generator** (`Op2Lib::generateMap`, `GenerateMapDialog`, `MainWindow::showGeneratedMap`; OP2Mapper3 `fGenerateMap` + `fMain.Generate`):
 
